@@ -400,15 +400,12 @@ function groupIntoRows(items, yTol=5){
   return rows;
 }
 
+const SUBJECT_HDR_RE = /^(Math|Maths|Mathematics|Language Arts?|English|Literacy|UOI|Unit\s+of\s+Inquiry|Learner|Student\s+as\s+[aA]\s+Learner|Science|Specialist|Learning|Social\s+Studies|PSPE|Drama|Music|Art|PE|Computing|ICT)$/i;
+
 function detectPdfColumns(rows){
-  // Find a row containing 2+ known subject headings
-  const SUBJECT_RE = /^(Math|Maths|Mathematics|Language|English|Literacy|UOI|Unit\s+of\s+Inquiry|Learner|Science|Specialist|Learning|Social\s+Studies|PSPE|Drama|Music|Art|PE|Computing|ICT)$/i;
   for(const row of rows){
-    const hits = row.items.filter(i => SUBJECT_RE.test(i.text.trim()));
+    const hits = row.items.filter(i => SUBJECT_HDR_RE.test(i.text.trim()));
     if(hits.length >= 2){
-      // Sort hit items by X to build column boundaries
-      const sorted = [...hits].sort((a,b)=>a.x-b.x);
-      // Build midpoint boundaries between consecutive column X positions
       const allXs = row.items.map(i=>i.x).sort((a,b)=>a-b);
       const boundaries = [0];
       for(let i=1; i<allXs.length; i++) boundaries.push((allXs[i-1]+allXs[i])/2);
@@ -444,163 +441,168 @@ function mergeItemsIntoLines(bucket){
 function parsePdfByColumns(items, colInfo, manualRoster){
   const { boundaries, subjects } = colInfo;
   const roster = new Set(manualRoster||[]);
-
   const colBuckets = subjects.map(()=>[]);
   items.forEach(item=>{
     const c = assignColumn(item.x, boundaries);
     if(c < colBuckets.length) colBuckets[c].push(item);
   });
-
   const nameLines    = mergeItemsIntoLines(colBuckets[0]);
   const subjectLines = colBuckets.slice(1).map(mergeItemsIntoLines);
-
   const studentEntries = [];
   nameLines.forEach(line=>{
     const t = line.text.trim();
     if(/^(Student|Name|Level|Emerging|Developing|Achieving|Extending|Secure|Beginning|Approaching)$/i.test(t)) return;
-    if(isLikelyStudentName(t)){
-      studentEntries.push({ name:t, y:line.y, page:line.page });
-      roster.add(t);
-    }
+    if(isLikelyStudentName(t)){ studentEntries.push({ name:t, y:line.y, page:line.page }); roster.add(t); }
   });
-
   if(studentEntries.length < 2) return { segments:[], roster };
-
   const segments = [];
-  for(let si = 0; si < studentEntries.length; si++){
-    const stu     = studentEntries[si];
-    const nextStu = studentEntries[si+1];
-    for(let ci = 0; ci < subjectLines.length; ci++){
-      const area = subjects[ci+1] || 'General';
-      const commentLines = subjectLines[ci].filter(line=>{
+  for(let si=0; si<studentEntries.length; si++){
+    const stu=studentEntries[si], nextStu=studentEntries[si+1];
+    for(let ci=0; ci<subjectLines.length; ci++){
+      const area = subjects[ci+1]||'General';
+      const lines = subjectLines[ci].filter(line=>{
         if(line.page < stu.page) return false;
-        if(line.page === stu.page && line.y < stu.y - 3) return false;
-        if(nextStu){
-          if(line.page > nextStu.page) return false;
-          if(line.page === nextStu.page && line.y >= nextStu.y - 3) return false;
-        }
+        if(line.page===stu.page && line.y < stu.y-3) return false;
+        if(nextStu){ if(line.page>nextStu.page) return false; if(line.page===nextStu.page && line.y>=nextStu.y-3) return false; }
         return true;
       });
-      const comment = commentLines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
-      if(!comment || comment.length < 20 || isGarbled(comment)) continue;
+      const comment = lines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
+      if(!comment || comment.length<20 || isGarbled(comment)) continue;
       segments.push({ studentName:stu.name, reportArea:area, level:extractLevel(comment), comment, sourceRef:`Page ${stu.page}`, confidence:'high' });
     }
   }
   return { segments, roster };
 }
 
-/* Linear fallback: read PDF as flowing text, find names + comments */
-function parsePdfLinear(rows, manualRoster){
+/* Split a block of text into {area, text} parts by inline subject markers */
+function splitByAreaMarkers(text){
+  const AREA_RE = /\b(Mathematics|Maths|Math|Language Arts?|English|Literacy|Unit of Inquiry|UOI|Learner|Student as [aA] Learner|Science|Specialist|PSPE|Drama|Music|Art\b|PE\b|Computing|ICT|Social Studies)\s*[:\-–]?\s*/gi;
+  const parts = [];
+  let lastIdx=0, lastArea=null, m;
+  AREA_RE.lastIndex = 0;
+  while((m=AREA_RE.exec(text))!==null){
+    if(m.index > lastIdx){
+      const chunk = text.slice(lastIdx, m.index).trim();
+      if(chunk.length>=20) parts.push({ area: lastArea||'General', text:chunk });
+    }
+    lastArea = normaliseArea(m[1]);
+    lastIdx  = AREA_RE.lastIndex;
+  }
+  if(lastIdx < text.length){
+    const chunk = text.slice(lastIdx).trim();
+    if(chunk.length>=20) parts.push({ area: lastArea||'General', text:chunk });
+  }
+  return parts.length ? parts : [{ area:'General', text }];
+}
+
+/*
+ * Robust linear fallback — scans individual PDF text items for student names.
+ * Works for:
+ *   - Landscape tables (name is leftmost item in a long row)
+ *   - Portrait document PDFs (name is a heading)
+ *   - Google Docs exports (text items may be in various orders)
+ */
+function parsePdfLinear(items, manualRoster){
   const roster   = new Set(manualRoster||[]);
   const segments = [];
-  const LEVEL_RE = /\b(Emerging|Developing|Achieving|Extending|Secure|Beginning|Approaching)\b/;
-  const SUBJECT_RE = /^(Math|Maths|Mathematics|Language|English|Literacy|UOI|Unit\s+of\s+Inquiry|Learner|Student\s+as\s+a\s+Learner|Science|Specialist|Drama|Music|Art|PE|PSPE|Social\s+Studies|Computing|ICT|General)$/i;
 
-  let curStudent = null;
-  let curArea    = 'General';
-  let buf        = [];
-  let curPage    = 1;
+  // Sort all items: page → Y → X (reading order)
+  const sorted = [...items].sort((a,b)=>{
+    if(a.page!==b.page) return a.page-b.page;
+    if(Math.abs(a.y-b.y)>4) return a.y-b.y;
+    return a.x-b.x;
+  });
 
-  function flush(){
-    const text = buf.join(' ').replace(/\s+/g,' ').trim();
-    buf = [];
-    if(!text || text.length < 30 || !curStudent) return;
-    if(isGarbled(text)) return;
-    const level = (text.match(LEVEL_RE)||[])[1]||null;
-    segments.push({ studentName:curStudent, reportArea:curArea, level, comment:text, sourceRef:`Page ${curPage}`, confidence:'medium' });
-  }
+  // Find name anchors — items (or adjacent pairs) that look like student names
+  const anchors = []; // { name, idx, page }
+  for(let i=0; i<sorted.length; i++){
+    const t = sorted[i].text.trim();
+    if(!t) continue;
 
-  for(const row of rows){
-    // Build the full text of this row, left to right
-    const lineText = row.items.map(i=>i.text).join(' ').replace(/\s+/g,' ').trim();
-    if(!lineText) continue;
-
-    // Short left-aligned text — candidate for name or subject header
-    const leftX   = row.items[0]?.x || 999;
-    const pageW   = 842; // A4 landscape width in pts (approximate)
-    const isLeft  = leftX < pageW * 0.18; // left 18% of page
-
-    // Level label alone on a line → skip (it's a column header or row label)
-    if(LEVEL_RE.test(lineText) && lineText.split(/\s+/).length <= 2) continue;
-
-    // Subject header
-    if(SUBJECT_RE.test(lineText.trim())){
-      flush();
-      curArea = normaliseArea(lineText.trim());
+    // Single-item name
+    if(isLikelyStudentName(t)){
+      // Avoid duplicate anchor if this name was already the previous anchor
+      const prev = anchors[anchors.length-1];
+      if(!prev || prev.name !== t){
+        anchors.push({ name:t, idx:i, page:sorted[i].page });
+        roster.add(t);
+      }
       continue;
     }
 
-    // Student name: short, left-aligned, looks like a name
-    if(isLeft && isLikelyStudentName(lineText)){
-      flush();
-      curStudent = lineText;
-      curArea    = 'General';
-      curPage    = row.page;
-      roster.add(lineText);
-      continue;
+    // Two adjacent items on the same line forming a name ("Alex" + "Chen")
+    if(i+1 < sorted.length){
+      const next = sorted[i+1];
+      if(sorted[i].page===next.page && Math.abs(sorted[i].y-next.y)<=4){
+        const combined = t+' '+next.text.trim();
+        if(isLikelyStudentName(combined)){
+          const prev = anchors[anchors.length-1];
+          if(!prev || prev.name !== combined){
+            anchors.push({ name:combined, idx:i, page:sorted[i].page });
+            roster.add(combined);
+            i++; // consumed next item
+          }
+          continue;
+        }
+      }
+    }
+  }
+
+  if(anchors.length < 1) return { segments, roster };
+
+  const SKIP_RE = /^(Emerging|Developing|Achieving|Extending|Secure|Beginning|Approaching|Student|Name|Level|Comment|Area|Report|Term|Card|Year|Class)\s*$/i;
+
+  for(let ni=0; ni<anchors.length; ni++){
+    const anchor    = anchors[ni];
+    const nextAnchor= anchors[ni+1];
+    const startIdx  = anchor.idx+1;
+    const endIdx    = nextAnchor ? nextAnchor.idx : sorted.length;
+
+    const parts = [];
+    for(let i=startIdx; i<endIdx; i++){
+      const t = sorted[i].text.trim();
+      if(!t || SKIP_RE.test(t)) continue;
+      if(isLikelyStudentName(t)) continue; // skip any other names that sneak in
+      parts.push(t);
     }
 
-    // Otherwise: comment text
-    if(curStudent) buf.push(lineText);
-  }
-  flush();
+    const fullText = parts.join(' ').replace(/\s+/g,' ').trim();
+    if(!fullText || fullText.length < 20 || isGarbled(fullText)) continue;
 
-  // If we got segments with area 'General', try to split by subject markers in the text
-  if(segments.length > 0 && segments.every(s=>s.reportArea==='General')){
-    return splitGeneralSegmentsByArea(segments, roster);
+    // Try to split into subject areas
+    const areaParts = splitByAreaMarkers(fullText);
+    areaParts.forEach(p=>{
+      if(!p.text || p.text.length<20 || isGarbled(p.text)) return;
+      segments.push({
+        studentName: anchor.name,
+        reportArea:  p.area,
+        level:       extractLevel(p.text),
+        comment:     p.text,
+        sourceRef:   `Page ${anchor.page}`,
+        confidence:  'medium',
+      });
+    });
   }
 
   return { segments, roster };
-}
-
-/* If all segments have area=General, try to split comment text by inline subject markers */
-function splitGeneralSegmentsByArea(segments, roster){
-  const AREA_MARKERS = /\b(Mathematics|Maths|Math|Language Arts|Language|English|Unit of Inquiry|UOI|Learner|Science|Specialist)\b\s*[:\-–]?\s*/gi;
-  const out = [];
-  for(const seg of segments){
-    const { comment } = seg;
-    AREA_MARKERS.lastIndex = 0;
-    const parts = [];
-    let lastIdx = 0; let lastArea = null; let m;
-    while((m = AREA_MARKERS.exec(comment)) !== null){
-      if(lastArea && m.index > lastIdx){
-        parts.push({ area: lastArea, text: comment.slice(lastIdx, m.index).trim() });
-      }
-      lastArea = normaliseArea(m[1]);
-      lastIdx  = AREA_MARKERS.lastIndex;
-    }
-    if(lastArea && lastIdx < comment.length){
-      parts.push({ area: lastArea, text: comment.slice(lastIdx).trim() });
-    }
-    if(parts.length >= 2){
-      parts.forEach(p=>{
-        if(!p.text || p.text.length < 20 || isGarbled(p.text)) return;
-        out.push({ ...seg, reportArea: p.area, comment: p.text, level: extractLevel(p.text) });
-      });
-    } else {
-      out.push(seg);
-    }
-  }
-  return { segments: out, roster };
 }
 
 async function parsePdfRows(file, manualRoster){
   const items = await readPdfItems(file);
   const rows  = groupIntoRows(items);
 
-  // Try column-based extraction first
+  // Attempt 1 — column-based (requires a subject header row)
   const colInfo = detectPdfColumns(rows);
   if(colInfo && colInfo.subjects.length >= 2){
     const result = parsePdfByColumns(items, colInfo, manualRoster);
     if(result.segments.length >= 2) return result;
   }
 
-  // Linear fallback — works for document-style PDFs
-  const linear = parsePdfLinear(rows, manualRoster);
+  // Attempt 2 — item-by-item name scan (works for any layout)
+  const linear = parsePdfLinear(items, manualRoster);
   if(linear.segments.length >= 1) return linear;
 
-  // Nothing found
-  return { segments:[], roster: new Set(manualRoster||[]), noTable: true };
+  return { segments:[], roster:new Set(manualRoster||[]), noTable:true };
 }
 
 /* ═══════════════════════════════════════════════════════════
