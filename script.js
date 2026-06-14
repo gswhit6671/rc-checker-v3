@@ -547,16 +547,12 @@ function checkLevelLabel(seg){
     const re = new RegExp(LEVEL_LABEL_RE.source,'gi');
     const m  = re.exec(sent);
     if(m){
-      const lvlWord   = cap(m[2]);
-      const noun      = m[3].replace(/\s+student$/,' student');
-      const corrected = sent.replace(new RegExp(escRe(m[0]),'gi'),
-        `a student working at an ${lvlWord} level`);
       issues.push({
         section:'biggest', type:'Level label as description',
         student:`${student} - ${area}`,
         exactSent: sent,
-        issue:`"${m[0].trim()}" — labels the student by their level rather than describing what they do.`,
-        fix:`"${corrected}"`,
+        issue:`"${m[0].trim()}" — do not use the student's level as a description.`,
+        fix:`Describe what the student does instead — e.g. "demonstrates strong ability in..." or name the specific skill or behaviour.`,
       });
     }
   }
@@ -916,14 +912,16 @@ function checkLevelAlignment(seg){
    RUN ALL CHECKS
 ═══════════════════════════════════════════════════════════════ */
 function runAllChecks(segments, roster, fullText, settings){
-  const { spellingPref, checkFirstPersonFlag, checkLevelFlag } = settings;
+  const { spellingPref, checkFirstPersonFlag, checkLevelFlag, hasManualRoster } = settings;
   const domStyle  = detectSpelling(fullText, spellingPref);
   const allIssues = [];
 
   checkSpellingConsistency(fullText, domStyle, segments).forEach(i=>allIssues.push(i));
 
   for(const seg of segments){
-    checkWrongName(seg, roster).forEach(i=>allIssues.push(i));
+    // Wrong-name check only runs when user has pasted a class list — auto-detected
+    // names are too unreliable and create false positives
+    if(hasManualRoster) checkWrongName(seg, roster).forEach(i=>allIssues.push(i));
     checkPronouns(seg).forEach(i=>allIssues.push(i));
     checkLevelLabel(seg).forEach(i=>allIssues.push(i));
     checkTypos(seg).forEach(i=>allIssues.push(i));
@@ -977,19 +975,19 @@ function consolidateIssues(allIssues){
     return acc;
   },[]);
 
-  if(labelIdx.length >= 3){
+  if(labelIdx.length >= 1){
     const labelIssues = labelIdx.map(idx=>allIssues[idx]);
     const examples = [...new Set(labelIssues.map(i=>{
       LEVEL_LABEL_RE.lastIndex=0;
       const m = LEVEL_LABEL_RE.exec(i.exactSent||'');
       return m ? m[0].trim() : null;
-    }).filter(Boolean))].slice(0,2);
+    }).filter(Boolean))].slice(0,3);
 
     docWide.push({
       section:'biggest', type:'Level label as description',
       student:'Whole document',
-      issue:`${labelIdx.length} comments describe students using their level as a label (${examples.map(e=>`"${e}"`).join(', ')}…). IB reports prefer describing what the student does.`,
-      fix:`Replace with behaviour descriptions — e.g. "an achieving student" → "a student who consistently demonstrates..." or "a student working at an Achieving level who..."`,
+      issue:`${labelIdx.length} comment${labelIdx.length>1?'s':''} use the student's level as a description (${examples.map(e=>`"${e}"`).join(', ')}${labelIdx.length>examples.length?'…':''}). IB PYP reports should not label students by their level.`,
+      fix:`Remove the label and describe what the student does instead — e.g. "an achieving student" → "demonstrates strong understanding of..." or simply describe their specific skill or behaviour.`,
     });
     labelIdx.forEach(idx=>skipIdx.add(idx));
   }
@@ -1364,8 +1362,10 @@ async function processFile(file){
         const result = extractPdfTableSegments(rawItems, colInfo, manualRoster);
         segments = result.segments;
         roster   = result.roster;
-        fullText = segments.map(s=>s.text).join('\n\n');
-      } else {
+      }
+
+      // If column extraction found no students, fall back to linear text parsing
+      if(!segments || segments.length < 2){
         fullText = reconstructLinearText(rawItems);
         const q  = checkPdfQuality(fullText);
         if(q==='empty'){
@@ -1376,10 +1376,12 @@ async function processFile(file){
           alert('This PDF could not be read clearly — complex table layouts can cause extraction issues.\n\nPlease upload the .docx version for accurate results.');
           return;
         }
-        const result = parsePlainText(fullText, manualRoster);
-        segments = result.segments;
-        roster   = result.roster;
+        const fallback = parsePlainText(fullText, manualRoster);
+        segments = fallback.segments;
+        roster   = fallback.roster;
       }
+
+      fullText = segments.map(s=>s.text).join('\n\n');
     }
   } catch(err){
     alert('Could not read this file. Make sure it is not password-protected.\n\nError: '+err.message);
@@ -1394,8 +1396,9 @@ async function processFile(file){
   const checkFirstPersonFlag = document.getElementById('chkFirstPerson').checked;
   const checkLevelFlag       = document.getElementById('chkLevel').checked;
 
+  const hasManualRoster = manualRoster.size > 0;
   const { allIssues } = runAllChecks(segments||[], roster||new Set(), fullText||'', {
-    spellingPref, checkFirstPersonFlag, checkLevelFlag,
+    spellingPref, checkFirstPersonFlag, checkLevelFlag, hasManualRoster,
   });
 
   const subtitle = 'Table of items to review before final submission.';
