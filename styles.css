@@ -421,6 +421,7 @@ tbody td {
 .td-word { font-family: 'Courier New', monospace; background: #f3f4f6; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
 .td-current { color: #6b7280; }
 .td-concern { color: #92400e; }
+.td-exact   { font-style: italic; color: #374151; background: #fafafa; }
 
 /* ── TYPE BADGE ───────────────────────────────────────────── */
 .type-badge {

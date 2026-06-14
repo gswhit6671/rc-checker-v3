@@ -1,18 +1,24 @@
 /* ═══════════════════════════════════════════════════════════════
    REPORT CARD CHECKER — script.js
-   Style matched to Y4GM and Y5JR sample feedback documents.
-   Conservative. High-confidence only. No IB/ATL suggestions.
+
+   ACCURACY FIRST:
+   · Every flagged issue must exist in the actual text.
+   · Every suggested fix is the exact corrected sentence/phrase.
+   · If the app cannot produce a real fix, it skips the issue.
+   · Only high-confidence patterns are checked.
+   · Area (Learner / UOI / Language / Math / Science / Specialist)
+     is detected per segment from headings and content.
 ═══════════════════════════════════════════════════════════════ */
 
 'use strict';
 
-/* ── WORDS THAT ARE NEVER STUDENT NAMES ──────────────────── */
+/* ─── WORDS THAT CANNOT BE STUDENT NAMES ─────────────────── */
 const NOT_NAMES = new Set([
   'Term','Report','Reports','Card','Cards','Year','Unit','Inquiry','Inquirer',
   'UOI','EAL','ATL','IB','PYP','STEM','PE','Art','Science','Music','Drama',
   'Geography','History','Physical','Education','Technology','Computing','ICT',
   'Mathematics','Maths','Math','English','Language','Reading','Writing',
-  'Literacy','Numeracy','Specialist','Grade',
+  'Literacy','Numeracy','Specialist','Grade','Level','Levels',
   'Student','Learner','Learning','Teacher','Primary','Secondary',
   'Profile','Attribute','Attributes','Skills','Skill','Comment','Comments',
   'Emerging','Developing','Achieving','Extending','Secure','Beginning',
@@ -28,237 +34,97 @@ const NOT_NAMES = new Set([
   'She','He','Spring','Autumn','Summer','Winter','Semester','Quarter',
   'Social','Self','Management','Thinking','Arts','General','Moving','Next',
   'Ascot','Google','Doc','Statistics','Probability','Forces','Friction',
-  'Gravity','Ancient','Rome','Roman','Story','Mountain','Level','Levels',
-  'Position','Number','Shape','Space','Data','Handling','Operations',
-  'Addition','Subtraction','Multiplication','Division','Fractions',
-  'Measurement','Geometry','Algebra','The','And','But','For','Not',
-  'Beginning','End','First','Last','New','Good','Well','Just','Only',
-  'How','Why','What','Where','Ascot','Whole','Every','Each','All',
+  'Gravity','Ancient','Rome','Roman','Story','Mountain','Position','Number',
+  'Shape','Space','Data','Handling','Operations','Fractions','Measurement',
+  'Geometry','Algebra','The','And','But','For','Not','Beginning','End',
+  'First','Last','New','Good','Well','Just','Only','How','Why',
+  'Every','All','Whole','Each','Some','Many',
 ]);
 
-/* ── UK / US SPELLING PAIRS ──────────────────────────────── */
-const UK_US = [
-  { us:/\borganiz(e|es|ed|ing|ation|ational|er|ers)\b/gi, uk:/\borganis(e|es|ed|ing|ation|ational|er|ers)\b/gi, usBase:'organize', ukBase:'organise' },
-  { us:/\banalyz(e|es|ed|ing)\b/gi,   uk:/\banalys(e|es|ed|ing)\b/gi,  usBase:'analyze',  ukBase:'analyse'  },
-  { us:/\brecogniz(e|es|ed|ing)\b/gi, uk:/\brecognis(e|es|ed|ing)\b/gi,usBase:'recognize',ukBase:'recognise'},
-  { us:/\bsummariz(e|es|ed|ing)\b/gi, uk:/\bsummaris(e|es|ed|ing)\b/gi,usBase:'summarize',ukBase:'summarise'},
-  { us:/\bcategoriz(e|es|ed|ing)\b/gi,uk:/\bcategoris(e|es|ed|ing)\b/gi,usBase:'categorize',ukBase:'categorise'},
-  { us:/\bcharacteriz(e|es|ed|ing)\b/gi,uk:/\bcharacteris(e|es|ed|ing)\b/gi,usBase:'characterize',ukBase:'characterise'},
-  { us:/\bemphasiz(e|es|ed|ing)\b/gi, uk:/\bemphasis(e|es|ed|ing)\b/gi,usBase:'emphasize',ukBase:'emphasise'},
-  { us:/\bfinaliz(e|es|ed|ing)\b/gi,  uk:/\bfinalis(e|es|ed|ing)\b/gi, usBase:'finalize', ukBase:'finalise' },
-  { us:/\butiliz(e|es|ed|ing)\b/gi,   uk:/\butilis(e|es|ed|ing)\b/gi,  usBase:'utilize',  ukBase:'utilise'  },
-  { us:/\bbehavior(s|al)?\b/gi,       uk:/\bbehaviour(s|al)?\b/gi,      usBase:'behavior', ukBase:'behaviour'},
-  { us:/\bcenter(s|ed|ing)?\b/gi,     uk:/\bcentre(s|d|ing)?\b/gi,      usBase:'center',   ukBase:'centre'   },
-  { us:/\bcolor(s|ed|ful|ing)?\b/gi,  uk:/\bcolour(s|ed|ful|ing)?\b/gi, usBase:'color',    ukBase:'colour'   },
-  { us:/\bfavorite(s)?\b/gi,          uk:/\bfavourite(s)?\b/gi,          usBase:'favorite', ukBase:'favourite'},
-  { us:/\blabor(s|ed)?\b/gi,          uk:/\blabour(s|ed)?\b/gi,          usBase:'labor',    ukBase:'labour'   },
-  { us:/\bpracticing\b/gi,            uk:/\bpractising\b/gi,             usBase:'practicing',ukBase:'practising'},
-  { us:/\bprogram(s|med|ming)?\b/gi,  uk:/\bprogramme(s|d|ming)?\b/gi,  usBase:'program',  ukBase:'programme'},
-  { us:/\bmodeling\b/gi,              uk:/\bmodelling\b/gi,              usBase:'modeling', ukBase:'modelling'},
+/* ─── AREA DETECTION ──────────────────────────────────────── */
+const AREAS = [
+  { label:'Learner',    re:/\b(student\s+as\s+a\s+learner|sal|learner)\b/i },
+  { label:'UOI',        re:/\b(unit\s+of\s+inquiry|uoi|central\s+idea)\b/i },
+  { label:'Language',   re:/\b(language arts?|english|literacy|reading|writing)\b/i },
+  { label:'Math',       re:/\b(math(?:ematics|s)?|numeracy)\b/i },
+  { label:'Science',    re:/\b(science)\b/i },
+  { label:'Specialist', re:/\b(specialist|physical\s+ed|music\b|drama\b|computing|library)\b/i },
 ];
 
-/* ── COMMON SPELLING ERRORS ──────────────────────────────── */
+/* ─── UK/US PAIRS ─────────────────────────────────────────── */
+const UK_US = [
+  { us:/\borganiz(e|es|ed|ing|ation|ational)\b/gi, uk:/\borganis(e|es|ed|ing|ation|ational)\b/gi, usW:'organize', ukW:'organise' },
+  { us:/\banalyz(e|es|ed|ing)\b/gi,   uk:/\banalys(e|es|ed|ing)\b/gi,   usW:'analyze',  ukW:'analyse'  },
+  { us:/\brecogniz(e|es|ed|ing)\b/gi, uk:/\brecognis(e|es|ed|ing)\b/gi, usW:'recognize',ukW:'recognise'},
+  { us:/\bsummariz(e|es|ed|ing)\b/gi, uk:/\bsummaris(e|es|ed|ing)\b/gi, usW:'summarize',ukW:'summarise'},
+  { us:/\butiliz(e|es|ed|ing)\b/gi,   uk:/\butilis(e|es|ed|ing)\b/gi,   usW:'utilize',  ukW:'utilise'  },
+  { us:/\bbehavior(s|al)?\b/gi,       uk:/\bbehaviour(s|al)?\b/gi,      usW:'behavior', ukW:'behaviour'},
+  { us:/\bcenter(s|ed)?\b/gi,         uk:/\bcentre(s|d)?\b/gi,          usW:'center',   ukW:'centre'   },
+  { us:/\bcolor(s|ed|ful)?\b/gi,      uk:/\bcolour(s|ed|ful)?\b/gi,     usW:'color',    ukW:'colour'   },
+  { us:/\bfavorite(s)?\b/gi,          uk:/\bfavourite(s)?\b/gi,         usW:'favorite', ukW:'favourite'},
+  { us:/\blabor(s|ed)?\b/gi,          uk:/\blabour(s|ed)?\b/gi,         usW:'labor',    ukW:'labour'   },
+  { us:/\bpracticing\b/gi,            uk:/\bpractising\b/gi,            usW:'practicing',ukW:'practising'},
+  { us:/\bprogram(s|med|ming)?\b/gi,  uk:/\bprogramme(s|d|ming)?\b/gi,  usW:'program',  ukW:'programme'},
+  { us:/\bmodeling\b/gi,              uk:/\bmodelling\b/gi,             usW:'modeling', ukW:'modelling'},
+];
+
+/* ─── KNOWN SPELLING ERRORS ───────────────────────────────── */
 const TYPOS = [
   ['recieve','receive'],['recieved','received'],['acheive','achieve'],
   ['acheivement','achievement'],['occured','occurred'],['seperate','separate'],
   ['accomodate','accommodate'],['beleive','believe'],['definately','definitely'],
   ['enviroment','environment'],['grammer','grammar'],['independant','independent'],
   ['knowlege','knowledge'],['neccessary','necessary'],['perseverence','perseverance'],
-  ['reccommend','recommend'],['resiliance','resilience'],['responsibilty','responsibility'],
+  ['reccommend','recommend'],['resiliance','resilience'],
   ['communcation','communication'],['collaberation','collaboration'],
   ['succesful','successful'],['untill','until'],['writting','writing'],
   ['develope','develop'],['managment','management'],['relfection','reflection'],
   ['experiance','experience'],['thier','their'],['truely','truly'],
   ['leanring','learning'],['apporach','approach'],['colaborate','collaborate'],
-  ['aswell','as well'],
 ];
 
-/* ── TONE / SENSITIVE WORDING ────────────────────────────── */
-const TONE_FLAGS = [
-  {
-    re: /\b(is\s+)?dysregulated\b/i, type:'Sensitive wording',
-    concern:'Clinical language not suited to a parent-facing report.',
-    suggest:'"is continuing to develop strategies to manage focus and emotions"',
-  },
-  {
-    re: /\bdistracts?\s+others?\b/i, type:'Sensitive wording',
-    concern:'Can sound negative in a report card.',
-    suggest:'"can impact the learning environment" or "is developing greater self-management"',
-  },
-  {
-    re: /\bbig\s+feelings?\b/i, type:'Informal/sensitive wording',
-    concern:'Informal and potentially sensitive phrasing in a formal report.',
-    suggest:'"strong emotions" or "emotional responses"',
-  },
-  {
-    re: /\b(has\s+)?personal\s+boundaries?\b/i, type:'Sensitive wording',
-    concern:'Could be sensitive in a parent-facing report.',
-    suggest:'"awareness of personal space and respectful interactions"',
-  },
-  {
-    re: /\b(high\s+level\s+of\s+)?intelligence\b/i, type:'Inappropriate fixed-trait wording',
-    concern:'"Intelligence" is a fixed-trait judgement and sounds less suitable for a report card.',
-    suggest:'"strong curiosity, reasoning skills, and an inquisitive nature"',
-  },
-  {
-    re: /\b(is\s+)?struggling\s+to\b/i, type:'Tone / wording',
-    concern:'Deficit-focused language.',
-    suggest:'"is continuing to develop" or "needs support with"',
-  },
-  {
-    re: /\bstruggles?\s+(to|with)\b/i, type:'Tone / wording',
-    concern:'Deficit-focused language.',
-    suggest:'"is working towards" or "is developing confidence with"',
-  },
-  {
-    re: /\ba\s+challenging\s+student\b/i, type:'Tone / wording',
-    concern:'Labels the child rather than describing the learning.',
-    suggest:'Describe the specific behaviour and next step instead.',
-  },
-  {
-    re: /\bweak\b/i, type:'Tone / wording',
-    concern:'Too negative for a parent-facing report.',
-    suggest:'"is developing" or "is building confidence with"',
-  },
-  {
-    re: /\b(is\s+)?lazy\b/i, type:'Sensitive wording',
-    concern:'Character judgement not appropriate in a report.',
-    suggest:'"is developing greater independence and effort"',
-  },
-  {
-    re: /\brefuses?\s+to\b/i, type:'Tone / wording',
-    concern:'Too direct for a parent-facing report.',
-    suggest:'"is working on" or "sometimes finds it difficult to"',
-  },
-  {
-    re: /\bfails?\s+to\b/i, type:'Tone / wording',
-    concern:'Deficit language — rephrase as a next step.',
-    suggest:'"is working towards" or "is developing the ability to"',
-  },
-  {
-    re: /\bmust\s+try\s+harder\b/i, type:'Tone / wording',
-    concern:'Too vague. Name the specific area to develop.',
-    suggest:'State the specific skill or behaviour to develop.',
-  },
-  {
-    re: /\bpoor\s+behavio(u?)r\b/i, type:'Tone / wording',
-    concern:'Too general and negative for a report card.',
-    suggest:'"is developing greater self-management in the classroom"',
-  },
-  {
-    re: /\bdo(es)?\s+not\s+care\b/i, type:'Tone / wording',
-    concern:'Too blunt for a parent-facing report.',
-    suggest:'"would benefit from greater engagement with their learning"',
-  },
-  {
-    re: /\battendance\s+(has|is|and)\b/i, type:'Sensitive wording',
-    concern:'Attendance is usually handled separately, not in the main comment.',
-    suggest:'Soften, e.g. "Consistent attendance will help [Name] make the most of every learning opportunity."',
-  },
-  {
-    re: /\bimproving\s+(her|his|their)\s+attendance\b/i, type:'Sensitive wording',
-    concern:'Too direct about attendance in a main report comment.',
-    suggest:'Soften, e.g. "Consistent attendance will help [Name] make the most of every learning opportunity."',
-  },
-  {
-    re: /\bpunctuality\b/i, type:'Sensitive wording',
-    concern:'Punctuality is usually handled separately, not in the main comment.',
-    suggest:'Remove from the main comment or move to a dedicated field.',
-  },
-];
-
-/* ── LEVEL-LABEL WORDING (flags "an achieving student" etc) ─ */
-const LEVEL_LABEL_RE = /\b(an?\s+)?(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+student\b/i;
-
-/* ── WORDY / INFORMAL PHRASES ────────────────────────────── */
-const WORDY = [
-  { re:/\bnomenclature\b/i,
-    type:'Word choice',
-    suggest:'"mathematical vocabulary," "fraction vocabulary," or "technical vocabulary"' },
-  { re:/\bin\s+order\s+to\b/i,
-    type:'Wordy phrasing',
-    suggest:'"to"' },
-  { re:/\bdue\s+to\s+the\s+fact\s+that\b/i,
-    type:'Wordy phrasing',
-    suggest:'"because"' },
-  { re:/\bprior\s+to\b/i,
-    type:'Wordy phrasing',
-    suggest:'"before"' },
-  { re:/\ba\s+wide\s+variety\s+of\b/i,
-    type:'Wordy phrasing',
-    suggest:'"many" or "a range of"' },
-  { re:/\ba\s+variety\s+of\s+different\b/i,
-    type:'Wordy phrasing',
-    suggest:'"a variety of"' },
-  { re:/\bon\s+a\s+regular\s+basis\b/i,
-    type:'Wordy phrasing',
-    suggest:'"regularly"' },
-  { re:/\bfor\s+the\s+purpose\s+of\b/i,
-    type:'Wordy phrasing',
-    suggest:'"to"' },
-  { re:/\bhas\s+been\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/i,
-    type:'Wordy phrasing',
-    suggest:'"understands"' },
-  { re:/\bis\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/i,
-    type:'Wordy phrasing',
-    suggest:'"understands"' },
-  { re:/\bhas\s+been\s+able\s+to\s+demonstrate\b/i,
-    type:'Wordy phrasing',
-    suggest:'"has demonstrated"' },
-  { re:/\bis\s+able\s+to\s+demonstrate\b/i,
-    type:'Wordy phrasing',
-    suggest:'"demonstrates"' },
-  { re:/\bis\s+able\s+to\b/i,
-    type:'Wordy phrasing',
-    suggest:'"can"' },
-  { re:/\btrue\s+role\s+model\b/i,
-    type:'Tone / wording',
-    suggest:'"positive role model for her peers" or "positive role model for classmates" (slightly more measured)' },
-  { re:/\bfoster\s+(independence|agency)\b/i,
-    type:'Wordy phrasing',
-    suggest:'"continue building independence, agency, and confidence"' },
-  { re:/\butilize[sd]?\b/i,
-    type:'Word choice',
-    suggest:'"use" or "apply" (more natural for a parent-facing report)' },
-  { re:/\bleverage[sd]?\b/i,
-    type:'Word choice',
-    suggest:'"use" or "apply"' },
-  { re:/\bfacilitate[sd]?\b/i,
-    type:'Word choice',
-    suggest:'"support" or "help"' },
-];
-
-/* ── HELPERS ──────────────────────────────────────────────── */
+/* ─── HELPERS ─────────────────────────────────────────────── */
 function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
 function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function wc(t)   { return (t.match(/\b[a-zA-Z]+\b/g)||[]).length; }
+function cap(s)  { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+/* Apply a regex replacement to a sentence and return the corrected version,
+   or null if the result looks wrong (same as input, or still contains the error). */
+function applyFix(sentence, searchRe, replacement){
+  const corrected = sentence.replace(searchRe, replacement);
+  if(corrected === sentence) return null;
+  return corrected;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    FILE READING
+   For .docx: use convertToHtml so we can detect headings/structure.
+   For .pdf: extract text with Y-position grouping.
 ═══════════════════════════════════════════════════════════════ */
-function readDocx(file){
+async function readDocxHtml(file){
   return new Promise((res,rej)=>{
-    const r=new FileReader();
-    r.onload = e => mammoth.extractRawText({arrayBuffer:e.target.result}).then(v=>res(v.value)).catch(rej);
-    r.onerror=rej;
+    const r = new FileReader();
+    r.onload = e => mammoth.convertToHtml({arrayBuffer:e.target.result}).then(v=>res(v.value)).catch(rej);
+    r.onerror = rej;
     r.readAsArrayBuffer(file);
   });
 }
 
 async function readPdf(file){
-  const buf=await file.arrayBuffer();
-  const pdf=await pdfjsLib.getDocument({data:buf}).promise;
-  const pages=[];
-  for(let i=1;i<=pdf.numPages;i++){
-    const page=await pdf.getPage(i);
-    const content=await page.getTextContent();
-    const lineMap=new Map();
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data:buf}).promise;
+  const pages = [];
+  for(let i=1; i<=pdf.numPages; i++){
+    const page    = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const lineMap = new Map();
     content.items.forEach(item=>{
-      const y=Math.round(item.transform[5]);
+      const y = Math.round(item.transform[5]);
       if(!lineMap.has(y)) lineMap.set(y,[]);
       lineMap.get(y).push(item.str);
     });
-    const lines=[...lineMap.entries()]
+    const lines = [...lineMap.entries()]
       .sort((a,b)=>b[0]-a[0])
       .map(([,parts])=>parts.join(' ').trim())
       .filter(l=>l.length>0);
@@ -267,112 +133,175 @@ async function readPdf(file){
   return pages.join('\n\n');
 }
 
-/* ── PDF QUALITY ──────────────────────────────────────────── */
+/* ─── PDF QUALITY ─────────────────────────────────────────── */
 function checkPdfQuality(text){
   if(!text||text.trim().length<60) return 'empty';
-  const lines=text.split('\n').filter(l=>l.trim().length>5);
+  const lines = text.split('\n').filter(l=>l.trim().length>5);
   if(lines.length<3) return 'too_short';
-  const real=lines.filter(l=>{
-    const ws=l.trim().split(/\s+/);
+  const real = lines.filter(l=>{
+    const ws = l.trim().split(/\s+/);
     if(ws.length<3) return false;
-    const avg=ws.reduce((s,w)=>s+w.replace(/[^a-z]/gi,'').length,0)/ws.length;
-    if(avg>13) return false;
-    if(/[A-Z]{6,}/.test(l)) return false;
-    return true;
+    const avg = ws.reduce((s,w)=>s+w.replace(/[^a-z]/gi,'').length,0)/ws.length;
+    return avg<=13 && !/[A-Z]{6,}/.test(l);
   });
-  if(real.length/lines.length<0.25) return 'garbled';
-  return 'ok';
+  return real.length/lines.length < 0.25 ? 'garbled' : 'ok';
 }
 
 /* ═══════════════════════════════════════════════════════════════
    DOCUMENT PARSING
+   Parses HTML (from mammoth) or plain text (from PDF) into
+   segments: { student, area, text, level }
 ═══════════════════════════════════════════════════════════════ */
-const AREA_RE=[
-  {area:'Learner',    re:/\b(student\s+as\s+a\s+learner|sal|\blearner\b)\b/i},
-  {area:'UOI',        re:/\b(unit\s+of\s+inquiry|uoi|central\s+idea)\b/i},
-  {area:'Language',   re:/\b(language|english|reading|writing|literacy)\b/i},
-  {area:'Math',       re:/\b(math|maths|mathematics|numeracy)\b/i},
-  {area:'Science',    re:/\b(science)\b/i},
-  {area:'Specialist', re:/\b(specialist|pe|physical\s+ed|music|drama|computing|ict|library)\b/i},
-];
-
-const LEVEL_RE=/\b(Emerging|Developing|Achieving|Extending|Beginning|Approaching|Meeting|Exceeding|Secure)\b/;
+const LEVEL_RE = /\b(Emerging|Developing|Achieving|Extending|Beginning|Approaching|Meeting|Exceeding|Secure)\b/;
 
 function detectArea(text){
-  for(const {area,re} of AREA_RE){ if(re.test(text)) return area; }
+  for(const {label,re} of AREAS){ if(re.test(text)) return label; }
   return 'General';
 }
 
-function isHeadingName(line, roster){
-  const t=line.trim();
-  if(t.length<2||t.length>50) return null;
-  if(/[.!?,;:–—]/.test(t)) return null;
-  if(/\b(is|are|was|has|have|can|will|does|did|the|and|but|for|in|on|at|to|of|a|an|with|from)\b/i.test(t)) return null;
+function looksLikeName(t, roster){
+  t = t.trim();
+  if(t.length<2||t.length>45) return null;
+  if(/[.!?,;:–—()\[\]{}]/.test(t)) return null;
+  // Must not contain sentence-structure words
+  if(/\b(is|are|was|has|have|can|will|does|did|the|and|but|for|in|on|at|to|of|a|an|with|from|that|this|his|her|their|which|who)\b/i.test(t)) return null;
 
-  // Roster match first
-  if(roster.size>0){
+  // Roster match (highest confidence)
+  if(roster && roster.size>0){
     for(const name of roster){
+      const first = name.split(/\s+/)[0];
       if(name.toLowerCase()===t.toLowerCase()) return name;
-      const first=name.split(/\s+/)[0];
-      if(first.length>=3&&first.toLowerCase()===t.toLowerCase()) return name;
+      if(first.length>=3 && first.toLowerCase()===t.toLowerCase()) return name;
     }
   }
-  // Pattern match: single or double capitalised word, not a known non-name
+
+  // Pattern: single or double proper name
   if(/^[A-Z][a-z]{1,20}(\s[A-Z][a-z]{1,20})?$/.test(t)){
-    const first=t.split(' ')[0];
-    if(!NOT_NAMES.has(first)&&first.length>=3) return t;
+    const first = t.split(' ')[0];
+    if(!NOT_NAMES.has(first) && first.length>=3) return t;
+  }
+  // Hyphenated name: D-Jaa, Mary-Anne
+  if(/^[A-Z][a-zA-Z]{0,10}-[A-Z][a-zA-Z]{1,15}$/.test(t)){
+    return t;
   }
   return null;
 }
 
-function isAreaLine(line){
-  const t=line.trim();
-  if(t.length>60||t.split(/\s+/).length>6) return null;
-  for(const {area,re} of AREA_RE){ if(re.test(t)) return area; }
+function looksLikeAreaHeading(t){
+  t = t.trim();
+  if(t.length<2||t.length>60) return null;
+  if(t.split(/\s+/).length>7) return null;
+  for(const {label,re} of AREAS){ if(re.test(t) && wc(t)<=6) return label; }
   return null;
 }
 
-function parseSegments(fullText, manualRoster){
-  const lines=fullText.split('\n');
-  const roster=new Set(manualRoster);
-  const builtRoster=new Set();
+/* Parse HTML output from mammoth into structured segments */
+function parseHtml(html, manualRoster){
+  const roster = new Set(manualRoster||[]);
 
-  // First pass — build internal roster
-  lines.forEach(line=>{ const n=isHeadingName(line.trim(),roster); if(n) builtRoster.add(n); });
-  for(const n of manualRoster) builtRoster.add(n);
+  // Build internal roster from heading elements first
+  const parser = new DOMParser();
+  const doc    = parser.parseFromString(html, 'text/html');
+  const elems  = Array.from(doc.body.children);
 
-  const segments=[];
-  let curStudent=null, curArea=null, buf=[];
+  // Pre-scan for names in headings
+  const builtRoster = new Set(roster);
+  elems.forEach(el=>{
+    const tag = el.tagName.toLowerCase();
+    const txt = el.textContent.trim();
+    if(['h1','h2','h3','h4'].includes(tag)){
+      const n = looksLikeName(txt, roster);
+      if(n) builtRoster.add(n);
+    } else if(tag==='p'){
+      // Bold-only paragraph → likely a heading
+      const bolds = el.querySelectorAll('strong, b');
+      const boldText = Array.from(bolds).map(b=>b.textContent).join('').trim();
+      if(boldText===txt && txt.length<50){
+        const n = looksLikeName(txt, roster);
+        if(n) builtRoster.add(n);
+      }
+    }
+  });
+
+  const segments = [];
+  let curStudent = null, curArea = null, buf = [];
 
   function flush(){
-    const text=buf.join('\n').trim(); buf=[];
-    if(!text||text.length<15) return;
-    if(!curStudent) return;
-    const level=(text.match(LEVEL_RE)||[])[1]||null;
-    segments.push({ student:curStudent, area:curArea||detectArea(text), text, level });
+    const text = buf.join('\n').trim(); buf = [];
+    if(!text || text.length<15 || !curStudent) return;
+    const level = (text.match(LEVEL_RE)||[])[1] || null;
+    const area  = curArea || detectArea(text);
+    segments.push({ student:curStudent, area, text, level });
+  }
+
+  elems.forEach(el=>{
+    const tag = el.tagName.toLowerCase();
+    const txt = el.textContent.trim();
+    if(!txt) return;
+
+    const isHeading = ['h1','h2','h3','h4'].includes(tag);
+    const isBoldOnly = tag==='p' && (() => {
+      const bolds = el.querySelectorAll('strong, b');
+      const boldText = Array.from(bolds).map(b=>b.textContent).join('').trim();
+      return boldText===txt && txt.length<50;
+    })();
+
+    if(isHeading || isBoldOnly){
+      const name = looksLikeName(txt, builtRoster);
+      const area = name ? null : looksLikeAreaHeading(txt);
+      if(name){   flush(); curStudent=name; curArea=null; return; }
+      if(area){   flush(); curArea=area;    return; }
+    }
+
+    // Regular text — check for inline "Name – Area" pattern
+    const inlineMatch = txt.match(/^([A-Z][a-z]{1,20}(?:\s[A-Z][a-z]{1,20})?)\s*[–\-—]\s*(.{3,30})$/);
+    if(inlineMatch){
+      const namePart = inlineMatch[1];
+      const areaPart = inlineMatch[2];
+      const name = looksLikeName(namePart, builtRoster);
+      const area = looksLikeAreaHeading(areaPart);
+      if(name){ flush(); curStudent=name; curArea=area||null; return; }
+    }
+
+    buf.push(txt);
+  });
+  flush();
+
+  return { segments, roster:builtRoster };
+}
+
+/* Parse plain text (PDF fallback) */
+function parsePlainText(fullText, manualRoster){
+  const roster = new Set(manualRoster||[]);
+  const lines  = fullText.split('\n');
+  const builtRoster = new Set(roster);
+
+  // Pre-scan
+  lines.forEach(line=>{
+    const n = looksLikeName(line.trim(), roster);
+    if(n) builtRoster.add(n);
+  });
+
+  const segments = [];
+  let curStudent = null, curArea = null, buf = [];
+
+  function flush(){
+    const text = buf.join('\n').trim(); buf = [];
+    if(!text||text.length<15||!curStudent) return;
+    const level = (text.match(LEVEL_RE)||[])[1]||null;
+    const area  = curArea||detectArea(text);
+    segments.push({ student:curStudent, area, text, level });
   }
 
   for(const line of lines){
-    const t=line.trim(); if(!t) continue;
-    const name=isHeadingName(t,builtRoster);
-    const area=name?null:isAreaLine(t);
+    const t = line.trim(); if(!t) continue;
+    const name = looksLikeName(t, builtRoster);
+    const area = name ? null : looksLikeAreaHeading(t);
     if(name){   flush(); curStudent=name; curArea=null; }
     else if(area){ flush(); curArea=area; }
     else { buf.push(t); }
   }
   flush();
-
-  // Fallback: no headings — try double-newline blocks
-  if(segments.length===0){
-    fullText.split(/\n{2,}/).map(b=>b.trim()).filter(b=>b.length>=20).forEach(block=>{
-      const firstLine=block.split('\n')[0].trim();
-      const name=isHeadingName(firstLine,builtRoster);
-      if(!name) return;
-      const rest=block.split('\n').slice(1).join('\n').trim();
-      const level=(rest.match(LEVEL_RE)||[])[1]||null;
-      segments.push({ student:name, area:detectArea(rest||block), text:rest||block, level });
-    });
-  }
 
   return { segments, roster:builtRoster };
 }
@@ -385,8 +314,8 @@ function detectSpelling(fullText, pref){
   if(pref==='us') return 'us';
   let uk=0, us=0;
   for(const p of UK_US){
-    us+=(fullText.match(p.us)||[]).length;
-    uk+=(fullText.match(p.uk)||[]).length;
+    us += (fullText.match(p.us)||[]).length;
+    uk += (fullText.match(p.uk)||[]).length;
   }
   if(uk===0&&us===0) return 'either';
   if(us>uk*2) return 'us';
@@ -398,47 +327,62 @@ function detectSpelling(fullText, pref){
    SENTENCE UTILITIES
 ═══════════════════════════════════════════════════════════════ */
 function splitSentences(text){
-  const raw=text.match(/[^.!?]*[.!?]+/g)||[text];
-  return raw.map(s=>s.trim()).filter(s=>s.length>8&&wc(s)>=4);
+  // Split on full stop / exclamation / question followed by space+capital or end
+  const parts = text.match(/[^.!?]+(?:[.!?]+(?=\s+[A-Z]|\s*$)|[.!?]+)/g) || [text];
+  return parts.map(s=>s.trim()).filter(s=>s.length>8 && wc(s)>=4);
 }
 
-function isClean(s){
-  if(!s||wc(s)<4) return false;
-  if(/[A-Z]{5,}/.test(s)) return false;
-  if(/\w{18,}/.test(s)) return false;
-  const ws=s.split(/\s+/);
-  const avg=ws.reduce((x,w)=>x+w.replace(/[^a-zA-Z]/g,'').length,0)/ws.length;
-  if(avg>12||avg<2) return false;
-  return true;
+function isUsableSentence(s){
+  if(!s || wc(s)<4)  return false;
+  if(/[A-Z]{5,}/.test(s))  return false;  // garbled caps
+  if(/\w{18,}/.test(s))    return false;  // merged words
+  const ws  = s.split(/\s+/);
+  const avg = ws.reduce((x,w)=>x+w.replace(/[^a-zA-Z]/g,'').length,0)/ws.length;
+  return avg>=2 && avg<=12;
 }
 
 /* ═══════════════════════════════════════════════════════════════
    CHECKS
+   Each check returns an array of issue objects:
+   {
+     section,  // 'biggest' | 'names' | 'spelling' | 'grammar' | 'tone' | 'firstperson' | 'wordy' | 'duplication' | 'level'
+     type,     // display label e.g. 'Grammar', 'Spelling error'
+     student,  // "Name — Area"
+     exactSent,// the full original sentence (shown in "What to check" col)
+     issue,    // brief description of what's wrong
+     fix,      // the EXACT corrected sentence or phrase
+   }
 ═══════════════════════════════════════════════════════════════ */
 
-/* A. WRONG NAME ──────────────────────────────────────────── */
+/* ─── A. WRONG NAME ───────────────────────────────────────── */
 function checkWrongName(seg, roster){
-  const {student,area,text}=seg;
-  const firstName=student.split(/\s+/)[0];
-  const issues=[];
-  const sents=splitSentences(text);
-  for(const name of roster){
-    if(name===student) continue;
-    const otherFirst=name.split(/\s+/)[0];
+  const { student, area, text } = seg;
+  const firstName = student.split(/[\s\-]+/)[0];
+  const issues = [];
+  const sents  = splitSentences(text);
+
+  for(const other of roster){
+    if(other===student) continue;
+    const otherFirst = other.split(/[\s\-]+/)[0];
     if(otherFirst.length<3) continue;
-    const re=new RegExp(`\\b${escRe(otherFirst)}\\b`,'g');
+    if(NOT_NAMES.has(otherFirst)) continue;
+
+    const re = new RegExp(`\\b${escRe(otherFirst)}\\b`,'g');
     for(const sent of sents){
-      if(!isClean(sent)) continue;
-      if(!re.test(sent)) continue;
-      re.lastIndex=0;
-      const idx=sent.search(re);
-      if(idx<2) continue; // skip if name is at the very start (title reference)
+      if(!isUsableSentence(sent)) continue;
+      const m = sent.match(re);
+      if(!m) continue;
+      // Skip if the name appears at the very start (could be a reference comparison)
+      const idx = sent.search(re);
+      if(idx<3) continue;
+
+      const corrected = sent.replace(re, firstName);
       issues.push({
-        section:'biggest',
-        type:'Wrong name',
+        section:'biggest', type:'Wrong name',
         student:`${student} — ${area}`,
-        check:`The comment appears to be for ${firstName}, but the name "${otherFirst}" appears inside the comment.`,
-        fix:`Check whether "${otherFirst}" should be changed to "${firstName}."`,
+        exactSent: sent,
+        issue:`The name "${otherFirst}" appears in ${firstName}'s comment — possible copy-paste from another student's report.`,
+        fix:`Check: "${corrected}"`,
       });
       break;
     }
@@ -446,63 +390,72 @@ function checkWrongName(seg, roster){
   return issues;
 }
 
-/* B. PRONOUNS ──────────────────────────────────────────────*/
+/* ─── B. PRONOUN INCONSISTENCY ─────────────────────────────── */
 function checkPronouns(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text).filter(isClean);
-  const hasMasc=sents.some(s=>/\b(he|him|his)\b/i.test(s));
-  const hasFem=sents.some(s=>/\b(she|her|hers)\b/i.test(s));
-  if(hasMasc&&hasFem){
+  const { student, area, text } = seg;
+  const sents = splitSentences(text).filter(isUsableSentence);
+  const heSents  = sents.filter(s=>/\b(he|him|his)\b/i.test(s));
+  const sheSents = sents.filter(s=>/\b(she|her|hers)\b/i.test(s));
+
+  if(heSents.length>0 && sheSents.length>0){
+    const example = heSents[0];
     return [{
-      section:'names',
-      type:'Pronoun inconsistency',
+      section:'names', type:'Pronoun inconsistency',
       student:`${student} — ${area}`,
-      check:`The comment for ${student.split(' ')[0]} uses both "he/him/his" and "she/her" pronouns.`,
-      fix:'Check the comment and use one set of pronouns consistently throughout.',
+      exactSent: example,
+      issue:`This comment uses both "he/him/his" and "she/her" pronouns. Example: "${heSents[0].trim()}"`,
+      fix:`Choose one set of pronouns throughout ${student.split(' ')[0]}'s entire ${area} comment and use it consistently.`,
     }];
   }
   return [];
 }
 
-/* C. LEVEL-LABEL WORDING ("an achieving student") ─────────*/
+/* ─── C. LEVEL LABEL ("an achieving student") ──────────────── */
+const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+(student|learner|child)\b/gi;
+
 function checkLevelLabel(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text);
-  const issues=[];
+  const { student, area, text } = seg;
+  const sents  = splitSentences(text);
+  const issues = [];
   for(const sent of sents){
-    if(!isClean(sent)) continue;
-    const m=sent.match(LEVEL_LABEL_RE);
+    if(!isUsableSentence(sent)) continue;
+    const re = new RegExp(LEVEL_LABEL_RE.source, 'gi');
+    const m  = re.exec(sent);
     if(m){
-      const lvl=m[2];
+      const lvlWord = cap(m[2]);
+      const noun    = m[3];
+      const corrected = sent.replace(new RegExp(escRe(m[0]),'gi'),
+        `a ${noun} working at an ${lvlWord} level`);
       issues.push({
-        section:'biggest',
-        type:'Awkward level label',
+        section:'biggest', type:'Awkward level label',
         student:`${student} — ${area}`,
-        check:`"${m[0]}" — describing the child as "an ${lvl} student" can sound like the level is labelling the child rather than describing achievement.`,
-        fix:`Use wording such as "is working at an ${lvl.charAt(0).toUpperCase()+lvl.slice(1)} level in…" or "is developing confidence in…"`,
+        exactSent: sent,
+        issue:`"${m[0]}" — describing a child as "${m[0].trim()}" labels them by their level rather than their learning.`,
+        fix:`"${corrected}"`,
       });
     }
   }
   return issues;
 }
 
-/* D. SPELLING TYPOS ─────────────────────────────────────── */
+/* ─── D. SPELLING TYPOS ─────────────────────────────────────── */
 function checkTypos(seg){
-  const {student,area,text}=seg;
-  const issues=[];
-  const sents=splitSentences(text);
+  const { student, area, text } = seg;
+  const issues = [];
+  const sents  = splitSentences(text);
   for(const sent of sents){
-    if(!isClean(sent)) continue;
-    for(const [wrong,right] of TYPOS){
-      const re=new RegExp(`\\b${escRe(wrong)}\\b`,'i');
-      const m=sent.match(re);
+    if(!isUsableSentence(sent)) continue;
+    for(const [wrong, right] of TYPOS){
+      const re = new RegExp(`\\b${escRe(wrong)}\\b`,'i');
+      const m  = sent.match(re);
       if(m){
+        const corrected = sent.replace(re, right);
         issues.push({
-          section:'spelling',
-          type:'Spelling error',
-          word:`${m[0]} → ${right}`,
-          usage:`"${m[0]}" in ${student}'s ${area} comment`,
-          rec:`Change "${m[0]}" to "${right}"`,
+          section:'spelling', type:'Spelling error',
+          student:`${student} — ${area}`,
+          word: `${m[0]} → ${right}`,
+          usage: `"${m[0]}" in the ${area} comment`,
+          rec:   `Corrected sentence: "${corrected}"`,
         });
         break;
       }
@@ -511,46 +464,39 @@ function checkTypos(seg){
   return issues;
 }
 
-/* E. UK/US CONSISTENCY (doc-level) ─────────────────────── */
+/* ─── E. UK/US CONSISTENCY (document-level) ─────────────────── */
 function checkSpellingConsistency(fullText, domStyle, allSegments){
   if(domStyle==='either') return [];
-  const issues=[];
-  const seen=new Set();
+  const issues = [];
+  const seen   = new Set();
 
   for(const seg of allSegments){
     for(const sent of splitSentences(seg.text)){
-      if(!isClean(sent)) continue;
+      if(!isUsableSentence(sent)) continue;
       for(const pair of UK_US){
-        const pairKey=pair.usBase+'/'+pair.ukBase;
-        if(seen.has(pairKey)) continue;
+        const key = pair.usW+'/'+pair.ukW;
+        if(seen.has(key)) continue;
+        let m, concern, rec;
 
-        if(domStyle==='uk'||domStyle==='mixed'){
-          const m=sent.match(pair.us);
+        if(domStyle==='uk' || domStyle==='mixed'){
+          m = sent.match(pair.us);
           if(m){
-            const concern=domStyle==='mixed'
-              ? `Both "${pair.usBase}" and "${pair.ukBase}" appear in the document.`
-              : `"${m[0]}" (US spelling) found — document mostly uses UK spelling.`;
-            issues.push({
-              section:'spelling',
-              word:`${pair.usBase} / ${pair.ukBase}`,
-              usage:concern,
-              rec:domStyle==='mixed'
-                ? `Choose one spelling style and use it consistently. Both UK and US spellings are acceptable — just not both.`
-                : `Change to UK spelling: "${pair.ukBase}"`,
-            });
-            seen.add(pairKey);
+            concern = domStyle==='mixed'
+              ? `Both "${pair.ukW}" and "${pair.usW}" appear in the document.`
+              : `"${m[0]}" (US spelling) found — the document mostly uses UK spelling.`;
+            rec = `Use "${pair.ukW}" consistently throughout.`;
+            seen.add(key);
           }
         } else if(domStyle==='us'){
-          const m=sent.match(pair.uk);
+          m = sent.match(pair.uk);
           if(m){
-            issues.push({
-              section:'spelling',
-              word:`${pair.usBase} / ${pair.ukBase}`,
-              usage:`"${m[0]}" (UK spelling) found — document mostly uses US spelling.`,
-              rec:`Change to US spelling: "${pair.usBase}"`,
-            });
-            seen.add(pairKey);
+            concern = `"${m[0]}" (UK spelling) found — the document mostly uses US spelling.`;
+            rec = `Use "${pair.usW}" consistently throughout.`;
+            seen.add(key);
           }
+        }
+        if(m){
+          issues.push({ section:'spelling', word:`${pair.usW} / ${pair.ukW}`, usage:concern, rec });
         }
       }
     }
@@ -558,298 +504,518 @@ function checkSpellingConsistency(fullText, domStyle, allSegments){
   return issues;
 }
 
-/* F. GRAMMAR ─────────────────────────────────────────────── */
+/* ─── F. GRAMMAR ─────────────────────────────────────────────── */
 
-// STRICT a/an: explicit safe cases only — no guessing
-const AAN_NEEDS_AN_LIST=[
-  [/\ba\s+(understanding)\b/i,  'an understanding'],
-  [/\ba\s+(inquiry)\b/i,        'an inquiry'],
-  [/\ba\s+(excellent)\b/i,      'an excellent'],
-  [/\ba\s+(important)\b/i,      'an important'],
-  [/\ba\s+(interesting)\b/i,    'an interesting'],
-  [/\ba\s+(effective)\b/i,      'an effective'],
-  [/\ba\s+(essential)\b/i,      'an essential'],
-  [/\ba\s+(engaging)\b/i,       'an engaging'],
-  [/\ba\s+(authentic)\b/i,      'an authentic'],
-  [/\ba\s+(accurate)\b/i,       'an accurate'],
-  [/\ba\s+(IB)\b/i,             'an IB'],
+/* A/AN — explicit allowlist only (never guess) */
+const AAN_TO_AN = [
+  /\ba\s+(understanding)\b/i,
+  /\ba\s+(inquiry)\b/i,
+  /\ba\s+(excellent)\b/i,
+  /\ba\s+(important)\b/i,
+  /\ba\s+(interesting)\b/i,
+  /\ba\s+(effective)\b/i,
+  /\ba\s+(engaging)\b/i,
+  /\ba\s+(authentic)\b/i,
+  /\ba\s+(accurate)\b/i,
+  /\ba\s+(IB)\b/i,
+  /\ba\s+(honest)\b/i,
+  /\ba\s+(enthusiastic)\b/i,
+  /\ba\s+(exceptional)\b/i,
+  /\ba\s+(impressive)\b/i,
+  /\ba\s+(outstanding)\b/i,
+  /\ba\s+(organised)\b/i,
+  /\ba\s+(organized)\b/i,
+  /\ba\s+(open[- ]minded)\b/i,
+  /\ba\s+(increasing)\b/i,
+  /\ba\s+(enjoyable)\b/i,
+  /\ba\s+(encouraging)\b/i,
 ];
-const AAN_NEEDS_A_LIST=[
-  [/\ban\s+(strong)\b/i,       'a strong'],
-  [/\ban\s+(great)\b/i,        'a great'],
-  [/\ban\s+(good)\b/i,         'a good'],
-  [/\ban\s+(student)\b/i,      'a student'],
-  [/\ban\s+(significant)\b/i,  'a significant'],
+const AAN_TO_A = [
+  /\ban\s+(strong)\b/i,
+  /\ban\s+(great)\b/i,
+  /\ban\s+(good)\b/i,
+  /\ban\s+(student)\b/i,
+  /\ban\s+(significant)\b/i,
+  /\ban\s+(steady)\b/i,
+  /\ban\s+(successful)\b/i,
+  /\ban\s+(key)\b/i,
+  /\ban\s+(growing)\b/i,
+  /\ban\s+(positive)\b/i,
+  /\ban\s+(creative)\b/i,
+  /\ban\s+(curious)\b/i,
+  /\ban\s+(confident)\b/i,
+  /\ban\s+(dedicated)\b/i,
+  /\ban\s+(motivated)\b/i,
+  /\ban\s+(talented)\b/i,
 ];
 
-// Missing "a" before "highly/very independent/keen/talented learner/thinker etc."
-const MISSING_A_RE=/\b(is|was|remains?|became?)\s+(very|highly|quite|an?\s+incredibly|incredibly|remarkably|quite)\s+(?!a\b|an\b)(independent|keen|talented|motivated|confident|dedicated|organised|organized|focused|resilient|thoughtful|engaged|enthusiastic)\s+(learner|thinker|communicator|contributor|member|reader|writer|mathematician)\b/i;
-
-// Missing "the" — common specific cases
-const MISSING_THE_LIST=[
-  { re:/\bapproaches\s+(Unit\s+of\s+Inquiry)\b/i, correct:'approaches the Unit of Inquiry' },
-  { re:/\bduring\s+(Unit\s+of\s+Inquiry)\b/i,     correct:'during the Unit of Inquiry' },
-  { re:/\bin\s+(Unit\s+of\s+Inquiry)\b/i,          correct:'in the Unit of Inquiry' },
-  { re:/\bthrough\s+(Unit\s+of\s+Inquiry)\b/i,     correct:'through the Unit of Inquiry' },
+/* Missing "the" before known phrases */
+const MISSING_THE = [
+  { re:/\b(approaches|during|in|through|across|throughout)\s+(Unit\s+of\s+Inquiry)\b/i,
+    fn: (m) => m[0].replace(m[2], 'the ' + m[2]) },
+  { re:/\bapproaches\s+(Units\s+of\s+Inquiry)\b/i,
+    fn: (m) => m[0].replace('approaches ', 'approaches the ') },
 ];
 
-// Missing hyphen
-const HYPHEN_LIST=[
-  { re:/\b(four|three|five|six|seven|eight)\s+paragraph\b(?!\s*[-–])/i, suggest:'Add a hyphen: e.g. "four-paragraph persuasive letter"' },
-  { re:/\bwell\s+written\b(?!\s*[-–])/i,       suggest:'Add a hyphen when used before a noun: "well-written"' },
-  { re:/\bwell\s+structured\b(?!\s*[-–])/i,    suggest:'Add a hyphen when used before a noun: "well-structured"' },
-  { re:/\bself\s+management\b(?!\s*[-–])/i,    suggest:'Add a hyphen: "self-management"' },
-  { re:/\bself\s+directed\b(?!\s*[-–])/i,      suggest:'Add a hyphen: "self-directed"' },
-  { re:/\bself\s+motivated\b(?!\s*[-–])/i,     suggest:'Add a hyphen: "self-motivated"' },
-  { re:/\bself\s+paced\b(?!\s*[-–])/i,         suggest:'Add a hyphen: "self-paced"' },
+/* Missing "a" before adjective+noun — specific safe patterns */
+const MISSING_A_PATTERNS = [
+  // "is highly independent learner" → "is a highly independent learner"
+  { re:/\b(is|was|remains?|became?)\s+(very|highly|quite|remarkably|incredibly|extremely)\s+(independent|keen|motivated|dedicated|focused|resilient|enthusiastic|thoughtful|engaged)\s+(learner|thinker|communicator|reader|writer|contributor|member)\b/i,
+    fn:(sent, m) => sent.replace(m[0], `${m[1]} a ${m[2]} ${m[3]} ${m[4]}`) },
+];
+
+/* Missing hyphen in compound adjectives — specific patterns */
+const HYPHEN_PATTERNS = [
+  { re:/\b(two|three|four|five|six|seven|eight)\s+(paragraph)\s+(persuasive|informative|narrative|recount|argument|essay|letter|text|piece)\b/i,
+    fn:(sent,m) => sent.replace(m[0], `${m[1]}-${m[2]} ${m[3]}`) },
+  { re:/\bself\s+(management|directed|motivated|paced|regulation|regulated|confidence|sufficient|sufficient)\b/i,
+    fn:(sent,m) => sent.replace(m[0], `self-${m[1]}`) },
+  { re:/\bwell\s+(written|structured|organised|organized|developed|supported|presented|researched|rounded)\b(?=\s+\w)/i,
+    fn:(sent,m) => sent.replace(m[0], `well-${m[1]}`) },
 ];
 
 function checkGrammar(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text);
-  const issues=[];
+  const { student, area, text } = seg;
+  const sents  = splitSentences(text);
+  const issues = [];
 
   for(const sent of sents){
-    if(!isClean(sent)) continue;
+    if(!isUsableSentence(sent)) continue;
 
-    // a/an — needs "an"
-    for(const [re,correct] of AAN_NEEDS_AN_LIST){
-      const m=sent.match(re);
+    // A → AN
+    for(const re of AAN_TO_AN){
+      const m = sent.match(re);
       if(m){
-        const improved=sent.replace(re,correct);
-        if(!/\ban\s+a[n]?\b/i.test(improved)){
-          issues.push({ section:'grammar', type:'Grammar', student:`${student} — ${area}`,
-            check:`"${m[0]}" — should be "${correct}".`,
-            fix:`Change "${m[0]}" to "${correct}".` });
+        const word      = m[1];
+        const corrected = sent.replace(re, `an ${word}`);
+        if(/\ban\s+a[n]?\b/i.test(corrected)) continue; // safety check
+        issues.push({
+          section:'grammar', type:'Grammar',
+          student:`${student} — ${area}`,
+          exactSent: sent,
+          issue:`"a ${word}" — should use "an" before a vowel sound.`,
+          fix:`"${corrected}"`,
+        });
+        break;
+      }
+    }
+
+    // AN → A
+    for(const re of AAN_TO_A){
+      const m = sent.match(re);
+      if(m){
+        const word      = m[1];
+        const corrected = sent.replace(re, `a ${word}`);
+        issues.push({
+          section:'grammar', type:'Grammar',
+          student:`${student} — ${area}`,
+          exactSent: sent,
+          issue:`"an ${word}" — "${word}" begins with a consonant sound and needs "a".`,
+          fix:`"${corrected}"`,
+        });
+        break;
+      }
+    }
+
+    // Missing "the"
+    for(const {re,fn} of MISSING_THE){
+      const m = sent.match(re);
+      if(m){
+        const corrected = sent.replace(m[0], fn(m));
+        if(corrected !== sent){
+          issues.push({
+            section:'grammar', type:'Missing word',
+            student:`${student} — ${area}`,
+            exactSent: sent,
+            issue:`"${m[0]}" — missing "the".`,
+            fix:`"${corrected}"`,
+          });
           break;
         }
       }
     }
 
-    // a/an — needs "a"
-    for(const [re,correct] of AAN_NEEDS_A_LIST){
-      const m=sent.match(re);
+    // Missing "a"
+    for(const {re,fn} of MISSING_A_PATTERNS){
+      const m = sent.match(re);
       if(m){
-        issues.push({ section:'grammar', type:'Grammar', student:`${student} — ${area}`,
-          check:`"${m[0]}" — "${m[1]}" begins with a consonant sound and needs "a", not "an".`,
-          fix:`Change "${m[0]}" to "${correct}".` });
-        break;
-      }
-    }
-
-    // Missing "a" before "highly independent learner" etc.
-    const mA=sent.match(MISSING_A_RE);
-    if(mA){
-      issues.push({ section:'grammar', type:'Missing word', student:`${student} — ${area}`,
-        check:`"${mA[0]}" — missing the article "a" before the noun phrase.`,
-        fix:`Add "a": e.g. "…is a highly ${mA[3]} ${mA[4]}"` });
-    }
-
-    // Missing "the"
-    for(const {re,correct} of MISSING_THE_LIST){
-      const m=sent.match(re);
-      if(m){
-        issues.push({ section:'grammar', type:'Missing word', student:`${student} — ${area}`,
-          check:`"${m[0]}" — missing "the".`,
-          fix:`Change to "${correct}".` });
-        break;
+        const corrected = fn(sent, m);
+        if(corrected && corrected!==sent){
+          issues.push({
+            section:'grammar', type:'Missing word',
+            student:`${student} — ${area}`,
+            exactSent: sent,
+            issue:`"${m[0]}" — missing the article "a".`,
+            fix:`"${corrected}"`,
+          });
+          break;
+        }
       }
     }
 
     // Missing hyphen
-    for(const {re,suggest} of HYPHEN_LIST){
-      const m=sent.match(re);
+    for(const {re,fn} of HYPHEN_PATTERNS){
+      const m = sent.match(re);
       if(m){
-        issues.push({ section:'grammar', type:'Hyphenation', student:`${student} — ${area}`,
-          check:`"${m[0]}" — compound adjective used before a noun needs a hyphen.`,
-          fix:suggest });
-        break;
+        const corrected = fn(sent, m);
+        if(corrected && corrected!==sent){
+          issues.push({
+            section:'grammar', type:'Hyphenation',
+            student:`${student} — ${area}`,
+            exactSent: sent,
+            issue:`"${m[0]}" — compound adjective needs a hyphen.`,
+            fix:`"${corrected}"`,
+          });
+          break;
+        }
       }
     }
   }
   return issues;
 }
 
-/* G. PUNCTUATION / SPACING ──────────────────────────────── */
+/* ─── G. PUNCTUATION / SPACING ──────────────────────────────── */
 function checkPunctuation(seg){
-  const {student,area,text}=seg;
-  const issues=[];
+  const { student, area, text } = seg;
+  const issues = [];
 
-  // Missing space after full stop — "word.Capital" — clear high-confidence cases
-  const re1=/([a-z]{3,})\.(Additionally|Furthermore|However|Throughout|This|The|In|During|As|By|After|Before|He|She|They|It|Our|His|Her|Their|One|Another|Over|Both|While|Since|Although|When|Although|Across|Through)/g;
-  let m;
-  const spacingCount=[];
-  while((m=re1.exec(text))!==null){
-    spacingCount.push({ student:`${student} — ${area}`, found:m[0], fix:`"${m[1]}. ${m[2]}"` });
-    if(spacingCount.length>=2) break;
+  // Missing space after full stop — only specific common words to avoid false positives
+  const spaceRe = /([a-z]{3,})\.(Additionally|Furthermore|However|Throughout|This|The|In|During|As|By|After|Before|He|She|They|It|Our|His|Her|Their|One|Another|Over|Both|While|Since|Although|When|Through)/g;
+  const spaceMatches = [];
+  let sm;
+  while((sm=spaceRe.exec(text))!==null){
+    spaceMatches.push(sm);
+    if(spaceMatches.length>=2) break;
   }
-  spacingCount.forEach(s=>{
-    issues.push({ section:'grammar', type:'Spacing', student:s.student,
-      check:`"${s.found}" — missing space after full stop.`,
-      fix:`Change to ${s.fix}.` });
-  });
-
-  // Extra full stop ("topic. ." or "topic..")
-  const re2=/\w[.]\s+[.]|[.][.]/g;
-  if(re2.test(text)){
-    issues.push({ section:'grammar', type:'Punctuation', student:`${student} — ${area}`,
-      check:'Extra full stop found (e.g. "topic. ." or "topic..").',
-      fix:'Remove the extra full stop.' });
+  for(const sm of spaceMatches){
+    issues.push({
+      section:'grammar', type:'Spacing',
+      student:`${student} — ${area}`,
+      exactSent: `"...${sm[0]}..."`,
+      issue:`Missing space after full stop: "${sm[0]}"`,
+      fix:`Change "${sm[0]}" to "${sm[1]}. ${sm[2]}"`,
+    });
   }
 
-  // Space before comma
-  const re3=/([a-zA-Z])\s,/g;
-  if(re3.test(text)){
-    issues.push({ section:'grammar', type:'Spacing', student:`${student} — ${area}`,
-      check:'Space before a comma found (e.g. "progress ,").',
-      fix:'Remove the space before the comma.' });
+  // Space before comma — "word ,"
+  const commaRe = /([a-zA-Z])\s,/g;
+  const cm = commaRe.exec(text);
+  if(cm){
+    const snippet = text.substring(Math.max(0,cm.index-15),cm.index+10).trim();
+    issues.push({
+      section:'grammar', type:'Spacing',
+      student:`${student} — ${area}`,
+      exactSent: `"${snippet}"`,
+      issue:`Space before comma: "${snippet}"`,
+      fix:`Remove the space before the comma.`,
+    });
+  }
+
+  // Extra full stop: "word. ." or "word.."
+  const dotRe = /([a-z]{2,})\.\s+\.|([a-z]{2,})\.\./g;
+  const dm = dotRe.exec(text);
+  if(dm){
+    const found = dm[0];
+    issues.push({
+      section:'grammar', type:'Punctuation',
+      student:`${student} — ${area}`,
+      exactSent: `"${found}"`,
+      issue:`Extra full stop: "${found}"`,
+      fix:`Remove the extra full stop.`,
+    });
   }
 
   return issues;
 }
 
-/* H. FIRST PERSON ───────────────────────────────────────── */
+/* ─── H. FIRST-PERSON WORDING ──────────────────────────────── */
 function checkFirstPerson(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text);
-  const issues=[];
-  const weMatches=[];
-  const ourMatches=[];
+  const { student, area, text } = seg;
+  const sents  = splitSentences(text);
+  const issues = [];
+
   for(const sent of sents){
-    if(!isClean(sent)) continue;
-    if(/\bwe\b/i.test(sent)) weMatches.push(sent);
-    if(/\bour\b/i.test(sent)) ourMatches.push(sent);
-  }
-  if(weMatches.length){
-    issues.push({ section:'firstperson', type:'First-person wording', student:`${student} — ${area}`,
-      current:`"we" used in comment`,
-      concern:'Report cards are usually written in third person.',
-      suggest:'Replace "we" with the subject. E.g. "As we moved into…" → "During the…"' });
-  }
-  if(ourMatches.length){
-    issues.push({ section:'firstperson', type:'First-person wording', student:`${student} — ${area}`,
-      current:`"our" used in comment (e.g. "${ourMatches[0].trim().substring(0,60)}…")`,
-      concern:'Report cards are usually written in third person.',
-      suggest:'Replace "our" with "the". E.g. "our biography unit" → "the biography unit".' });
+    if(!isUsableSentence(sent)) continue;
+
+    // "As we moved into / explored / looked at / began / studied..."
+    const weRe = /\bAs\s+we\s+(moved?\s+into|explored?|looked?\s+at|began?|studied?|continued?|delved?|turned?\s+to|worked?\s+on)\b/i;
+    const we1  = sent.match(weRe);
+    if(we1){
+      const corrected = sent.replace(weRe, (m, verb) => {
+        const verbMap = {
+          'moved into':'During', 'move into':'During', 'explored':'During',
+          'explore':'During','looked at':'In','look at':'In',
+          'began':'During','begin':'During','studied':'During','study':'During',
+          'continued':'Continuing to','delved':'In','turned to':'Moving to',
+          'worked on':'Working on',
+        };
+        const mapped = verbMap[verb.toLowerCase()] || 'During';
+        return mapped;
+      });
+      if(corrected !== sent){
+        issues.push({
+          section:'firstperson', type:'First-person wording',
+          student:`${student} — ${area}`,
+          exactSent: sent,
+          issue:`"${we1[0]}" — first-person "we" in a report card.`,
+          fix:`Consider: "${corrected}"`,
+        });
+        continue;
+      }
+    }
+
+    // "our [X] unit" → "the [X] unit"
+    const ourUnit = sent.match(/\bour\s+(\w+(?:\s+\w+)?)\s+(unit|study|investigation|inquiry|work|project|learning|focus|exploration|theme)\b/i);
+    if(ourUnit){
+      const corrected = sent.replace(ourUnit[0], `the ${ourUnit[1]} ${ourUnit[2]}`);
+      issues.push({
+        section:'firstperson', type:'First-person wording',
+        student:`${student} — ${area}`,
+        exactSent: sent,
+        issue:`"${ourUnit[0]}" — "our" in a report card is first-person.`,
+        fix:`"${corrected}"`,
+      });
+    }
   }
   return issues;
 }
 
-/* I. TONE ───────────────────────────────────────────────── */
+/* ─── I. TONE ─────────────────────────────────────────────────
+   Only flag very specific patterns where the concern is clear
+   AND we can produce an exact corrected sentence.
+──────────────────────────────────────────────────────────── */
+const TONE_RULES = [
+  {
+    // "big feelings" → "strong emotions"
+    re: /\bbig\s+feelings?\b/gi,
+    type:'Informal/sensitive wording',
+    fn:(sent) => ({ corrected: sent.replace(/\bbig\s+feelings?\b/gi,'strong emotions'), label:'"big feelings"' }),
+  },
+  {
+    // "dysregulated" → "continuing to develop strategies to manage focus and emotions"
+    re: /\b(becomes?|is|was|felt?|gets?)\s+dysregulated\b/gi,
+    type:'Sensitive wording',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`${m[1]} continuing to develop strategies to manage focus and emotions`), label:'"dysregulated"' }),
+  },
+  {
+    re:/\bdysregulated\b/gi,
+    type:'Sensitive wording',
+    fn:(sent) => ({ corrected: sent.replace(/\bdysregulated\b/gi,'continuing to develop strategies to manage focus and emotions'), label:'"dysregulated"' }),
+  },
+  {
+    // "displays a high level of intelligence" → "demonstrates strong reasoning skills"
+    re:/\b(displays?|shows?|has)\s+a\s+high\s+level\s+of\s+intelligence\b/gi,
+    type:'Fixed-trait wording',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`${m[1]} strong reasoning skills and curiosity`), label:'"high level of intelligence"' }),
+  },
+  {
+    // "showcase his/her/their intelligence" → "showcase his/her/their reasoning skills"
+    re:/\b(showcase|show|display|demonstrate)\s+(his|her|their)\s+intelligence\b/gi,
+    type:'Fixed-trait wording',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`${m[1]} ${m[2]} reasoning skills and curiosity`), label:'"intelligence"' }),
+  },
+  {
+    // "improving his/her/their attendance" → softer version
+    re:/\b(improving|improve)\s+(his|her|their)\s+attendance\b/gi,
+    type:'Sensitive wording',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`consistent attendance will support ${m[2]} continued learning`), label:'"improving attendance"' }),
+  },
+  {
+    // "remains focused on improving her attendance and punctuality"
+    re:/\bremains?\s+focused\s+on\s+improving\s+(his|her|their)\s+attendance(\s+and\s+punctuality)?\b/gi,
+    type:'Sensitive wording',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`continued consistency with attendance${m[2]?` and punctuality`:''} will further support ${m[1]} learning`), label:'"improving attendance"' }),
+  },
+  {
+    // "distracts others" → "can impact the learning environment"
+    re:/\bdistracts?\s+others?\b/gi,
+    type:'Sensitive wording',
+    fn:(sent) => ({ corrected: sent.replace(/\bdistracts?\s+others?\b/gi,'can impact the learning environment'), label:'"distracts others"' }),
+  },
+  {
+    // "personal boundaries and respectful use of space" → gentler
+    re:/\bpersonal\s+boundaries\b/gi,
+    type:'Sensitive wording',
+    fn:(sent) => ({ corrected: sent.replace(/\bpersonal\s+boundaries\b/gi,'awareness of personal space and respectful interactions'), label:'"personal boundaries"' }),
+  },
+  {
+    // "true role model" → "positive role model for peers"
+    re:/\btrue\s+role\s+model\b/gi,
+    type:'Tone / wording',
+    fn:(sent) => ({ corrected: sent.replace(/\btrue\s+role\s+model\b/gi,'positive role model for peers'), label:'"true role model"' }),
+  },
+  {
+    // "is lazy" / "can be lazy"
+    re:/\b(is|can\s+be|was)\s+lazy\b/gi,
+    type:'Sensitive wording',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`${m[1]} developing greater independence and effort`), label:'"lazy"' }),
+  },
+];
+
 function checkTone(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text);
-  const issues=[];
+  const { student, area, text } = seg;
+  const sents  = splitSentences(text);
+  const issues = [];
+
   for(const sent of sents){
-    if(!isClean(sent)) continue;
-    for(const rule of TONE_FLAGS){
-      const m=sent.match(rule.re);
+    if(!isUsableSentence(sent)) continue;
+    for(const rule of TONE_RULES){
+      const m = sent.match(rule.re);
       if(!m) continue;
-      // Skip "challenging tasks/work/content" — about the content not the child
-      if(/(challenging|difficult)\s+(task|work|content|text|question|problem|activity|topic|reading|concept)/i.test(sent)&&
-         /challenging|difficult/i.test(m[0])) continue;
-      issues.push({ section:'tone', type:rule.type, student:`${student} — ${area}`,
-        current:`"${sent.trim()}"`,
-        concern:rule.concern,
-        suggest:rule.suggest });
+      const result = rule.fn(sent, m);
+      if(!result || !result.corrected || result.corrected===sent) continue;
+      issues.push({
+        section:'tone', type:rule.type,
+        student:`${student} — ${area}`,
+        exactSent: sent,
+        issue:`${result.label} — this wording may not be suitable for a parent-facing report.`,
+        fix:`"${result.corrected}"`,
+      });
+      break; // one issue per sentence
+    }
+  }
+  return issues;
+}
+
+/* ─── J. WORDINESS ────────────────────────────────────────────
+   Only flag specific, unambiguous cases where the fix is exact.
+────────────────────────────────────────────────────────────── */
+const WORDY_RULES = [
+  {
+    re:/\bnomenclature\b/gi, type:'Word choice',
+    fn:(sent) => ({ corrected: sent.replace(/\bnomenclature\b/gi,'mathematical vocabulary') }),
+  },
+  {
+    re:/\bis\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi, type:'Wordy phrasing',
+    fn:(sent) => ({ corrected: sent.replace(/\bis\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi,'understands') }),
+  },
+  {
+    re:/\bhas\s+been\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi, type:'Wordy phrasing',
+    fn:(sent) => ({ corrected: sent.replace(/\bhas\s+been\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi,'understands') }),
+  },
+  {
+    re:/\bhas\s+been\s+able\s+to\s+demonstrate\b/gi, type:'Wordy phrasing',
+    fn:(sent) => ({ corrected: sent.replace(/\bhas\s+been\s+able\s+to\s+demonstrate\b/gi,'has demonstrated') }),
+  },
+  {
+    re:/\bis\s+able\s+to\s+demonstrate\b/gi, type:'Wordy phrasing',
+    fn:(sent) => ({ corrected: sent.replace(/\bis\s+able\s+to\s+demonstrate\b/gi,'demonstrates') }),
+  },
+  {
+    re:/\brequires\s+teacher\s+(assistance|support|guidance)\s+to\s+foster\s+(independence|agency)\b/gi, type:'Wordy phrasing',
+    fn:(sent,m) => ({ corrected: sent.replace(m[0],`benefits from teacher ${m[1]} to continue building independence`) }),
+  },
+  {
+    re:/\bfoster\s+independence\s+and\s+agency\b/gi, type:'Wordy phrasing',
+    fn:(sent) => ({ corrected: sent.replace(/\bfoster\s+independence\s+and\s+agency\b/gi,'continue building independence and confidence') }),
+  },
+];
+
+function checkWordiness(seg){
+  const { student, area, text } = seg;
+  const sents  = splitSentences(text);
+  const issues = [];
+
+  for(const sent of sents){
+    if(!isUsableSentence(sent)) continue;
+    for(const rule of WORDY_RULES){
+      const m = sent.match(rule.re);
+      if(!m) continue;
+      const result = rule.fn(sent, m);
+      if(!result||!result.corrected||result.corrected===sent) continue;
+      issues.push({
+        section:'wordy', type:rule.type,
+        student:`${student} — ${area}`,
+        exactSent: sent,
+        issue:`"${m[0]}" — wordy or overly formal phrasing.`,
+        fix:`"${result.corrected}"`,
+      });
       break;
     }
   }
   return issues;
 }
 
-/* J. WORDINESS ──────────────────────────────────────────── */
-function checkWordiness(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text);
-  const issues=[];
-  for(const sent of sents){
-    if(!isClean(sent)) continue;
-    for(const {re,type,suggest} of WORDY){
-      const m=sent.match(re);
-      if(m){
-        issues.push({ section:'wordy', type:type||'Wording', student:`${student} — ${area}`,
-          current:`"${m[0]}"`,
-          concern:'Wordy or overly formal phrasing that may be unclear for some parents.',
-          suggest:`Consider: ${suggest}` });
-        break;
-      }
-    }
-  }
-  return issues;
-}
-
-/* K. DUPLICATION / CONTRADICTION ───────────────────────── */
+/* ─── K. DUPLICATION / CONTRADICTION ─────────────────────────── */
 function checkDuplication(seg){
-  const {student,area,text}=seg;
-  const sents=splitSentences(text);
-  const issues=[];
+  const { student, area, text } = seg;
+  const sents  = splitSentences(text);
+  const issues = [];
 
   for(const sent of sents){
-    if(!isClean(sent)) continue;
+    if(!isUsableSentence(sent)) continue;
 
-    // "Furthermore/Moreover ... also"
-    if(/\b(furthermore|moreover)\b[^.]{0,80}\balso\b/i.test(sent)){
-      issues.push({ section:'duplication', type:'Redundant wording', student:`${student} — ${area}`,
-        check:'"furthermore" (or "moreover") and "also" used together in one sentence.',
-        fix:'Use one or the other: "Furthermore, he is encouraged…" or "He is also encouraged…"' });
+    // Exact word repeated ("the the", "a a", "and and")
+    const dbl = sent.match(/\b(\w{1,15})\s+\1\b/i);
+    if(dbl){
+      const corrected = sent.replace(new RegExp(`\\b(${escRe(dbl[1])})\\s+\\1\\b`,'gi'), dbl[1]);
+      issues.push({
+        section:'duplication', type:'Repeated word',
+        student:`${student} — ${area}`,
+        exactSent: sent,
+        issue:`"${dbl[0]}" — word repeated twice in a row.`,
+        fix:`"${corrected}"`,
+      });
     }
 
-    // Exact word repeated ("the the", "and and", "a a", "to to")
-    const dbl=sent.match(/\b(\w{1,15})\s+\1\b/i);
-    if(dbl){
-      issues.push({ section:'duplication', type:'Repeated word', student:`${student} — ${area}`,
-        check:`"${dbl[0]}" — the same word appears twice in a row.`,
-        fix:`Remove the duplicate "${dbl[1]}".` });
+    // "Furthermore/Moreover ... also" in same sentence
+    if(/\b(furthermore|moreover)\b[^.]{0,90}\balso\b/i.test(sent)){
+      const corrected = sent.replace(/\balso\b/, '').replace(/\s{2,}/g,' ').trim();
+      issues.push({
+        section:'duplication', type:'Redundant wording',
+        student:`${student} — ${area}`,
+        exactSent: sent,
+        issue:`"furthermore" (or "moreover") and "also" used in the same sentence — this is redundant.`,
+        fix:`Remove "also": "${corrected}"`,
+      });
     }
   }
 
-  // Contradiction: "can X … is learning to X"
-  if(/\bcan\b.{0,80}\bis\s+(learning|working)\s+to\b/i.test(text)){
-    issues.push({ section:'duplication', type:'Possible contradiction', student:`${student} — ${area}`,
-      check:'The comment says the student can already do something, then says they are learning to do it.',
-      fix:'Choose one: either the student can already do this, or they are working towards it.' });
+  // Contradiction: "can do X … is learning to do X"
+  if(/\bcan\b.{5,80}\bis\s+(learning|working)\s+to\b/i.test(text)){
+    issues.push({
+      section:'duplication', type:'Possible contradiction',
+      student:`${student} — ${area}`,
+      exactSent:'(Across the comment)',
+      issue:'The comment says the student can already do something, then says they are learning to do it.',
+      fix:'Choose one: either the student can already do this, or they are working towards it — not both in the same comment.',
+    });
   }
 
   return issues;
 }
 
-/* L. LEVEL ALIGNMENT ────────────────────────────────────── */
-const STRONG_WORDS=/\b(exemplary|remarkable|outstanding|exceptional|surpasses?|beyond\s+the\s+(curriculum|requirements?|expectations?)|extends?\s+(her|his|their)?\s+learning\s+beyond)\b/i;
-const WEAK_WORDS=/\b(is\s+beginning|still\s+developing|finding\s+(this\s+)?difficult|needs?\s+(a\s+lot\s+of\s+)?support\b|with\s+support|not\s+yet)\b/i;
+/* ─── L. LEVEL ALIGNMENT ─────────────────────────────────────── */
+const STRONG_RE = /\b(exemplary|remarkable|outstanding|exceptional|surpasses?|beyond\s+the\s+(curriculum|requirements?|expectations?)|extends?\s+(her|his|their)?\s+learning\s+beyond)\b/i;
+const WEAK_RE   = /\b(is\s+beginning\s+to|still\s+developing|finding\s+(this\s+)?quite\s+difficult|needs?\s+a\s+great\s+deal\s+of\s+support|with\s+significant\s+support|not\s+yet\s+able)\b/i;
 
 function checkLevelAlignment(seg){
-  const {student,area,text,level}=seg;
+  const { student, area, text, level } = seg;
   if(!level) return [];
-  const isHigh=/(Extending|Exceeding)/i.test(level);
-  const isLow=/(Emerging|Beginning|Approaching)/i.test(level);
-  const issues=[];
+  const isHigh = /(Extending|Exceeding)/i.test(level);
+  const isLow  = /(Emerging|Beginning|Approaching)/i.test(level);
+  const issues = [];
 
-  if(!isHigh&&STRONG_WORDS.test(text)){
-    const m=text.match(STRONG_WORDS);
-    issues.push({ section:'level', student:`${student} — ${area}`, level,
+  if(!isHigh && STRONG_RE.test(text)){
+    const m = text.match(STRONG_RE);
+    issues.push({
+      section:'level', type:'Level / comment mismatch',
+      student:`${student} — ${area}`,
+      level,
       concern:`The comment uses very strong wording ("${m[0]}") that sounds stronger than the selected level (${level}).`,
-      action:'Either raise the level or slightly reduce the wording of the comment.' });
+      action:`Either raise the level to reflect the comment, or slightly reduce the wording of the comment.`,
+    });
   }
-  if(!isLow&&WEAK_WORDS.test(text)){
-    const m=text.match(WEAK_WORDS);
-    issues.push({ section:'level', student:`${student} — ${area}`, level,
+  if(!isLow && WEAK_RE.test(text)){
+    const m = text.match(WEAK_RE);
+    issues.push({
+      section:'level', type:'Level / comment mismatch',
+      student:`${student} — ${area}`,
+      level,
       concern:`The comment uses wording ("${m[0]}") that suggests the student may be below the selected level (${level}).`,
-      action:'Either lower the level or revise the comment to better reflect the selected level.' });
+      action:`Either lower the level or revise the comment to better reflect the selected level.`,
+    });
   }
-  return issues;
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   WHOLE-DOCUMENT CHECKS (not per-student)
-═══════════════════════════════════════════════════════════════ */
-function checkDocumentWide(fullText, domStyle, segments){
-  const issues=[];
-
-  // UK/US consistency
-  const spellIssues=checkSpellingConsistency(fullText,domStyle,segments);
-  spellIssues.forEach(i=>issues.push(i));
-
   return issues;
 }
 
@@ -857,16 +1023,15 @@ function checkDocumentWide(fullText, domStyle, segments){
    RUN ALL CHECKS
 ═══════════════════════════════════════════════════════════════ */
 function runAllChecks(segments, roster, fullText, settings){
-  const {spellingPref,checkFirstPersonFlag,checkLevelFlag}=settings;
-  const domStyle=detectSpelling(fullText,spellingPref);
-  const allIssues=[];
+  const { spellingPref, checkFirstPersonFlag, checkLevelFlag } = settings;
+  const domStyle  = detectSpelling(fullText, spellingPref);
+  const allIssues = [];
 
-  // Document-wide checks
-  checkDocumentWide(fullText,domStyle,segments).forEach(i=>allIssues.push(i));
+  // Document-level spelling consistency
+  checkSpellingConsistency(fullText, domStyle, segments).forEach(i=>allIssues.push(i));
 
-  // Per-segment checks
   for(const seg of segments){
-    checkWrongName(seg,roster).forEach(i=>allIssues.push(i));
+    checkWrongName(seg, roster).forEach(i=>allIssues.push(i));
     checkPronouns(seg).forEach(i=>allIssues.push(i));
     checkLevelLabel(seg).forEach(i=>allIssues.push(i));
     checkTypos(seg).forEach(i=>allIssues.push(i));
@@ -879,279 +1044,258 @@ function runAllChecks(segments, roster, fullText, settings){
     if(checkLevelFlag) checkLevelAlignment(seg).forEach(i=>allIssues.push(i));
   }
 
-  return {allIssues,domStyle};
+  return { allIssues, domStyle };
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   RENDER — tables styled to match Y4GM / Y5JR sample documents
+   RENDER
 ═══════════════════════════════════════════════════════════════ */
 function h(s){ return escH(s); }
 
 function makeSection(title, icon, count){
-  const el=document.createElement('div');
-  el.className='feedback-section';
-  const countBadge=count>0?` <span class="section-count">${count}</span>`:'';
-  el.innerHTML=`<div class="section-heading">${icon} ${h(title)}${countBadge}</div>`;
+  const el = document.createElement('div');
+  el.className = 'feedback-section';
+  el.innerHTML = `<div class="section-heading">${icon} ${h(title)}<span class="section-count">${count}</span></div>`;
   return el;
 }
 
-function emptySection(title,icon,msg){
-  const el=document.createElement('div');
-  el.className='feedback-section';
-  el.innerHTML=`<div class="section-heading">${icon} ${h(title)}</div><div class="section-ok">&#10003; ${h(msg)}</div>`;
+function emptySection(title, icon, msg){
+  const el = document.createElement('div');
+  el.className = 'feedback-section';
+  el.innerHTML = `<div class="section-heading">${icon} ${h(title)}</div><div class="section-ok">&#10003; ${h(msg)}</div>`;
   return el;
 }
 
-/* --- Biggest fixes needed (+ name issues) ─────────────────── */
+function stdTable(issues, colHeaders, rowFn){
+  const rows = issues.map(rowFn).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr>${colHeaders.map(c=>`<th>${h(c)}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+/* Biggest fixes + Level labels */
 function renderBiggest(issues){
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student||'Whole document')}</td>
-    <td><span class="type-badge">${h(i.type||'')}</span></td>
-    <td class="td-issue">${h(i.check||i.col1||'')}</td>
-    <td class="td-fix">${h(i.fix||i.col3||'')}</td>
-  </tr>`).join('');
-  const el=issues.length===0
-    ? emptySection('Biggest fixes needed','&#128276;','No major issues found. See sections below for smaller checks.')
-    : makeSection('Biggest fixes needed','&#128276;',issues.length);
-  if(issues.length>0) el.innerHTML+=`
-    <div class="table-wrap"><table>
-      <thead><tr><th>Student / Area</th><th>Issue type</th><th>What to check</th><th>Suggested fix</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>`;
+  if(!issues.length) return emptySection('Biggest fixes needed','&#128276;','No major issues found. See sections below for smaller checks.');
+  const el = makeSection('Biggest fixes needed','&#128276;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','What to check','Suggested fix'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-issue">${h(i.issue)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Name and pronoun consistency ─────────────────────────── */
+/* Names / Pronouns */
 function renderNames(issues){
   if(!issues.length) return emptySection('Name and pronoun consistency','&#128101;','No name or pronoun issues found.');
-  const el=makeSection('Name and pronoun consistency','&#128101;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td><span class="type-badge">${h(i.type)}</span></td>
-    <td class="td-issue">${h(i.check)}</td>
-    <td class="td-fix">${h(i.fix)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Issue type</th><th>What to check</th><th>Suggested fix</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('Name and pronoun consistency','&#128101;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','What to check','Suggested fix'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-issue">${h(i.issue)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Spelling ──────────────────────────────────────────────── */
+/* Spelling */
 function renderSpelling(issues){
   if(!issues.length) return emptySection('Spelling and UK/US consistency','&#128221;','No spelling issues found.');
-  const el=makeSection('Spelling and UK/US consistency','&#128221;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-word-cell"><span class="td-word">${h(i.word)}</span></td>
-    <td class="td-current">${h(i.usage)}</td>
-    <td class="td-fix">${h(i.rec)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Word / phrase</th><th>Current usage</th><th>Recommendation</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('Spelling and UK/US consistency','&#128221;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Word / phrase','Current usage','Recommendation'],
+    i=>`<tr>
+      <td class="td-word-cell"><span class="td-word">${h(i.word||'')}</span></td>
+      <td class="td-current">${h(i.usage||'')}</td>
+      <td class="td-fix">${h(i.rec||'')}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Grammar, punctuation, spacing ────────────────────────── */
+/* Grammar / punctuation */
 function renderGrammar(issues){
   if(!issues.length) return emptySection('Grammar, punctuation and spacing','&#9998;','No grammar or punctuation issues found.');
-  const el=makeSection('Grammar, punctuation and spacing','&#9998;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td><span class="type-badge">${h(i.type)}</span></td>
-    <td class="td-issue">${h(i.check)}</td>
-    <td class="td-fix">${h(i.fix)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Issue type</th><th>What to check</th><th>Suggested fix</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('Grammar, punctuation and spacing','&#9998;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','Exact sentence from report','Suggested correction'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-issue td-exact">${h(i.exactSent)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Tone ──────────────────────────────────────────────────── */
+/* Tone */
 function renderTone(issues){
   if(!issues.length) return emptySection('Tone comments to soften','&#128172;','No sensitive or negative tone issues found.');
-  const el=makeSection('Tone comments to soften','&#128172;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td class="td-current">${h(i.current||i.col1)}</td>
-    <td class="td-concern">${h(i.concern||i.col2)}</td>
-    <td class="td-fix">${h(i.suggest||i.col3)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Current wording</th><th>Concern</th><th>Suggested wording</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('Tone comments to soften','&#128172;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','Current wording','Suggested wording'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-exact td-current">${h(i.exactSent)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- First person ──────────────────────────────────────────── */
+/* First person */
 function renderFirstPerson(issues){
   if(!issues.length) return null;
-  const el=makeSection('First-person wording (we / our / I)','&#9997;&#65039;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td class="td-current">${h(i.current)}</td>
-    <td class="td-concern">${h(i.concern)}</td>
-    <td class="td-fix">${h(i.suggest)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Current wording</th><th>Concern</th><th>Suggested wording</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('First-person wording (we / our)','&#9997;&#65039;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','Current wording','Suggested wording'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-exact td-current">${h(i.exactSent)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Wordiness ─────────────────────────────────────────────── */
+/* Wordiness */
 function renderWordy(issues){
-  if(!issues.length) return emptySection('Wordiness / informal wording / parent-friendly clarity','&#128196;','No wordiness or clarity issues found.');
-  const el=makeSection('Wordiness / informal wording / parent-friendly clarity','&#128196;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td class="td-current">${h(i.current)}</td>
-    <td class="td-concern">${h(i.concern)}</td>
-    <td class="td-fix">${h(i.suggest)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Current wording</th><th>Concern</th><th>Suggested wording</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  if(!issues.length) return emptySection('Wordiness / parent-friendly clarity','&#128196;','No wordiness or clarity issues found.');
+  const el = makeSection('Wordiness / parent-friendly clarity','&#128196;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','Current wording','Suggested wording'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-exact td-current">${h(i.exactSent)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Duplication ───────────────────────────────────────────── */
+/* Duplication */
 function renderDuplication(issues){
   if(!issues.length) return emptySection('Duplication or contradiction','&#128260;','No duplication or contradiction issues found.');
-  const el=makeSection('Duplication or contradiction','&#128260;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td><span class="type-badge">${h(i.type)}</span></td>
-    <td class="td-issue">${h(i.check)}</td>
-    <td class="td-fix">${h(i.fix)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Issue type</th><th>What to check</th><th>Suggested fix</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('Duplication or contradiction','&#128260;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Issue type','What to check','Suggested fix'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.type)}</span></td>
+      <td class="td-issue td-exact">${h(i.exactSent)}</td>
+      <td class="td-fix">${h(i.fix)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Level alignment ───────────────────────────────────────── */
+/* Level alignment */
 function renderLevel(issues){
   if(!issues.length) return null;
-  const el=makeSection('Comments that may sound stronger or weaker than their level','&#127919;',issues.length);
-  const rows=issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td>${h(i.level)}</td>
-    <td class="td-concern">${h(i.concern)}</td>
-    <td class="td-fix">${h(i.action)}</td>
-  </tr>`).join('');
-  el.innerHTML+=`<div class="table-wrap"><table>
-    <thead><tr><th>Student / Area</th><th>Level</th><th>Comment concern</th><th>Possible action</th></tr></thead>
-    <tbody>${rows}</tbody></table></div>`;
+  const el = makeSection('Comments that may sound stronger or weaker than their level','&#127919;', issues.length);
+  el.innerHTML += stdTable(issues,
+    ['Student / Area','Level','Comment concern','Possible action'],
+    i=>`<tr>
+      <td class="td-student">${h(i.student)}</td>
+      <td><span class="type-badge">${h(i.level)}</span></td>
+      <td class="td-concern">${h(i.concern)}</td>
+      <td class="td-fix">${h(i.action)}</td>
+    </tr>`);
   return el;
 }
 
-/* --- Priority checklist (as a table, matching Y5JR style) ─── */
+/* Priority table */
 function buildPriority(allIssues){
-  const items=[];
-  const names=allIssues.filter(i=>i.section==='biggest'&&(i.type||'').toLowerCase().includes('name'));
-  if(names.length) items.push(`Fix ${names.length} possible wrong-name issue${names.length>1?'s':''}.`);
-
-  const pronouns=allIssues.filter(i=>i.section==='names');
-  if(pronouns.length) items.push(`Fix ${pronouns.length} pronoun inconsistency issue${pronouns.length>1?'s':''}.`);
-
-  const typos=allIssues.filter(i=>i.section==='spelling'&&i.type==='Spelling error');
+  const items = [];
+  const wrongNames = allIssues.filter(i=>i.type==='Wrong name');
+  if(wrongNames.length) items.push(`Fix ${wrongNames.length} possible wrong-name issue${wrongNames.length>1?'s':''}.`);
+  const pronouns = allIssues.filter(i=>i.type==='Pronoun inconsistency');
+  if(pronouns.length) items.push(`Fix pronoun inconsistency in ${pronouns.map(i=>i.student).join(', ')}.`);
+  const typos = allIssues.filter(i=>i.section==='spelling'&&i.type==='Spelling error');
   if(typos.length) items.push(`Correct ${typos.length} spelling error${typos.length>1?'s':''}: ${typos.slice(0,3).map(i=>i.word).join(', ')}${typos.length>3?'…':''}.`);
-
-  const consist=allIssues.filter(i=>i.section==='spelling'&&!i.type);
-  if(consist.length) items.push(`Resolve UK/US spelling inconsistency (${consist.slice(0,2).map(i=>i.word).join(', ')}${consist.length>2?'…':''}).`);
-
-  const fp=allIssues.filter(i=>i.section==='firstperson');
+  const consist = allIssues.filter(i=>i.section==='spelling'&&!i.type);
+  if(consist.length) items.push(`Resolve UK/US spelling inconsistency (${consist.slice(0,2).map(i=>i.word).join(', ')}).`);
+  const fp = allIssues.filter(i=>i.section==='firstperson');
   if(fp.length) items.push(`Remove or reduce first-person wording ("our", "we") — found in ${fp.length} comment${fp.length>1?'s':''}.`);
-
-  const tone=allIssues.filter(i=>i.section==='tone');
-  if(tone.length){
-    const labels=[...new Set(tone.slice(0,3).map(i=>i.type))];
-    items.push(`Soften sensitive or negative wording: ${labels.join(', ')}.`);
-  }
-
-  const gram=allIssues.filter(i=>i.section==='grammar');
-  if(gram.length) items.push(`Review ${gram.length} grammar/punctuation item${gram.length>1?'s':''}.`);
-
-  const dup=allIssues.filter(i=>i.section==='duplication');
+  const tone = allIssues.filter(i=>i.section==='tone');
+  if(tone.length) items.push(`Soften sensitive wording in ${tone.length} comment${tone.length>1?'s':''}. See "Tone" section.`);
+  const gram = allIssues.filter(i=>i.section==='grammar');
+  if(gram.length) items.push(`Fix ${gram.length} grammar or punctuation issue${gram.length>1?'s':''}.`);
+  const dup = allIssues.filter(i=>i.section==='duplication');
   if(dup.length) items.push(`Fix ${dup.length} duplication or contradiction item${dup.length>1?'s':''}.`);
-
-  const level=allIssues.filter(i=>i.section==='level');
-  if(level.length) items.push(`Review comment/level alignment for ${level.length} comment${level.length>1?'s':''}.`);
-
+  const lev = allIssues.filter(i=>i.section==='level');
+  if(lev.length) items.push(`Review comment/level alignment for ${lev.map(i=>i.student).join(', ')}.`);
   return items;
 }
 
 function renderPriority(items){
-  const box=document.getElementById('priorityBox');
-  const tbl=document.getElementById('priorityTable');
+  const box = document.getElementById('priorityBox');
+  const tbl = document.getElementById('priorityTable');
   if(!items.length){ box.hidden=true; return; }
-  tbl.innerHTML=items.map((it,i)=>`<tr>
+  tbl.innerHTML = items.map((it,i)=>`<tr>
     <td class="priority-num">Priority ${i+1}</td>
     <td class="priority-action">${h(it)}</td>
   </tr>`).join('');
-  box.hidden=false;
+  box.hidden = false;
 }
 
-/* ── MAIN RENDER ────────────────────────────────────────── */
+/* Main render */
 function renderResults(allIssues, warnings, fileName, className){
   const title = className
     ? `${className} Report Card Feedback`
     : (fileName ? `${fileName.replace(/\.[^.]+$/,'')} Report Card Feedback` : 'Report Card Feedback');
-  document.getElementById('resultsTitle').textContent=title;
+  document.getElementById('resultsTitle').textContent = title;
 
-  // Warnings
-  const warnBox=document.getElementById('extractionWarning');
-  const warnList=document.getElementById('warningList');
+  const warnBox  = document.getElementById('extractionWarning');
+  const warnList = document.getElementById('warningList');
   if(warnings.length){
-    warnList.innerHTML=warnings.map(w=>`<li>${h(w)}</li>`).join('');
-    warnBox.hidden=false;
-  } else { warnBox.hidden=true; }
+    warnList.innerHTML = warnings.map(w=>`<li>${h(w)}</li>`).join('');
+    warnBox.hidden = false;
+  } else { warnBox.hidden = true; }
 
-  // Summary
-  const total=allIssues.length;
-  const bigCount=allIssues.filter(i=>i.section==='biggest').length;
-  const nameCount=allIssues.filter(i=>i.section==='names').length;
+  // Summary pills
+  const total    = allIssues.length;
+  const bigCount = allIssues.filter(i=>i.section==='biggest').length;
+  const nameCount= allIssues.filter(i=>i.section==='names').length;
   const spellCount=allIssues.filter(i=>i.section==='spelling').length;
-  const gramCount=allIssues.filter(i=>i.section==='grammar').length;
-  const toneCount=allIssues.filter(i=>i.section==='tone').length;
-  document.getElementById('summaryBar').innerHTML=`
+  const gramCount= allIssues.filter(i=>i.section==='grammar').length;
+  const toneCount= allIssues.filter(i=>i.section==='tone').length;
+
+  document.getElementById('summaryBar').innerHTML = `
     <div class="summary-pill ${total>10?'red':total>3?'amber':'green'}">
       <span class="pill-count">${total}</span> items to review
     </div>
-    ${bigCount?`<div class="summary-pill red"><span class="pill-count">${bigCount}</span> biggest fixes</div>`:''}
-    ${nameCount?`<div class="summary-pill red"><span class="pill-count">${nameCount}</span> name/pronoun</div>`:''}
-    ${spellCount?`<div class="summary-pill amber"><span class="pill-count">${spellCount}</span> spelling</div>`:''}
-    ${gramCount?`<div class="summary-pill amber"><span class="pill-count">${gramCount}</span> grammar</div>`:''}
-    ${toneCount?`<div class="summary-pill amber"><span class="pill-count">${toneCount}</span> tone</div>`:''}
-    ${total===0?`<div class="summary-pill green"><span class="pill-count">&#10003;</span> No issues found</div>`:''}
+    ${bigCount  ?`<div class="summary-pill red">  <span class="pill-count">${bigCount}</span>   biggest fixes</div>`:''}
+    ${nameCount ?`<div class="summary-pill red">  <span class="pill-count">${nameCount}</span>   name/pronoun</div>`:''}
+    ${spellCount?`<div class="summary-pill amber"><span class="pill-count">${spellCount}</span>  spelling</div>`:''}
+    ${gramCount ?`<div class="summary-pill amber"><span class="pill-count">${gramCount}</span>   grammar</div>`:''}
+    ${toneCount ?`<div class="summary-pill amber"><span class="pill-count">${toneCount}</span>   tone</div>`:''}
+    ${total===0 ?`<div class="summary-pill green"><span class="pill-count">&#10003;</span> No issues found</div>`:''}
   `;
 
   // Sections
-  const body=document.getElementById('feedbackBody');
-  body.innerHTML='';
+  const body = document.getElementById('feedbackBody');
+  body.innerHTML = '';
 
-  const biggestIssues=allIssues.filter(i=>i.section==='biggest');
-  body.appendChild(renderBiggest(biggestIssues));
+  body.appendChild(renderBiggest(allIssues.filter(i=>i.section==='biggest')));
   body.appendChild(renderNames(allIssues.filter(i=>i.section==='names')));
   body.appendChild(renderSpelling(allIssues.filter(i=>i.section==='spelling')));
   body.appendChild(renderGrammar(allIssues.filter(i=>i.section==='grammar')));
   body.appendChild(renderTone(allIssues.filter(i=>i.section==='tone')));
-
-  const fpEl=renderFirstPerson(allIssues.filter(i=>i.section==='firstperson'));
+  const fpEl = renderFirstPerson(allIssues.filter(i=>i.section==='firstperson'));
   if(fpEl) body.appendChild(fpEl);
-
   body.appendChild(renderWordy(allIssues.filter(i=>i.section==='wordy')));
   body.appendChild(renderDuplication(allIssues.filter(i=>i.section==='duplication')));
-
-  const lvlEl=renderLevel(allIssues.filter(i=>i.section==='level'));
+  const lvlEl = renderLevel(allIssues.filter(i=>i.section==='level'));
   if(lvlEl) body.appendChild(lvlEl);
 
   renderPriority(buildPriority(allIssues));
 
-  document.getElementById('resultsSection').hidden=false;
+  document.getElementById('resultsSection').hidden = false;
   document.getElementById('resultsSection').scrollIntoView({behavior:'smooth'});
 }
 
@@ -1159,91 +1303,81 @@ function renderResults(allIssues, warnings, fileName, className){
    DOWNLOADS
 ═══════════════════════════════════════════════════════════════ */
 function dlBlob(blob,name){
-  const url=URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
   Object.assign(document.createElement('a'),{href:url,download:name}).click();
   setTimeout(()=>URL.revokeObjectURL(url),3000);
 }
 
-function flattenForExport(allIssues){
+function flatForExport(allIssues){
   return allIssues.map(i=>({
     section: i.section,
     type:    i.type||'',
     student: i.student||'Whole document',
-    col1:    i.check||i.word||i.current||'',
-    col2:    i.check?'':i.usage||i.concern||'',
-    col3:    i.fix||i.rec||i.suggest||i.action||'',
+    check:   i.issue||i.concern||i.usage||'',
+    fix:     i.fix||i.rec||i.action||'',
   }));
 }
 
-function downloadCsv(allIssues,titleStr){
-  const flat=flattenForExport(allIssues);
-  const hdr=['Section','Issue type','Student / Area','Issue / Current wording','Additional detail','Suggested fix'];
-  const csv=[hdr,...flat.map(r=>[r.section,r.type,r.student,r.col1,r.col2,r.col3])]
+function downloadCsv(allIssues, titleStr){
+  const flat = flatForExport(allIssues);
+  const hdr  = ['Section','Issue type','Student / Area','What to check','Suggested fix'];
+  const csv  = [hdr,...flat.map(r=>[r.section,r.type,r.student,r.check,r.fix])]
     .map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),titleStr.replace(/\s+/g,'_')+'_feedback.csv');
+  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}), titleStr.replace(/\s+/g,'_')+'_feedback.csv');
 }
 
-function downloadHtml(allIssues,titleStr,subtitleStr){
-  const flat=flattenForExport(allIssues);
-  const rows=flat.map(r=>`<tr>
-    <td>${h(r.section)}</td><td>${h(r.type)}</td><td><strong>${h(r.student)}</strong></td>
-    <td>${h(r.col1)}</td><td style="color:#166534">${h(r.col3)}</td>
+function downloadHtml(allIssues, titleStr, subtitle){
+  const flat = flatForExport(allIssues);
+  const rows = flat.map(r=>`<tr>
+    <td>${h(r.section)}</td><td>${h(r.type)}</td>
+    <td><strong>${h(r.student)}</strong></td>
+    <td>${h(r.check)}</td>
+    <td style="color:#166534">${h(r.fix)}</td>
   </tr>`).join('');
-  const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
-<title>${h(titleStr)}</title>
-<style>body{font-family:Arial,sans-serif;margin:40px;font-size:13px;color:#1a2332}
-h1{color:#1a3a5c;font-size:20px}p.sub{color:#4b5563;margin:6px 0 24px;font-size:13px}
-table{width:100%;border-collapse:collapse}
-thead th{background:#1a3a5c;color:#fff;padding:9px 12px;text-align:left;font-size:12px}
-tbody td{padding:9px 12px;border-bottom:1px solid #f0f4f8;vertical-align:top;font-size:12.5px;line-height:1.5}
-.note{color:#6b7280;font-style:italic;font-size:12px;margin-top:24px;border-top:1px solid #e5e7eb;padding-top:12px}</style>
-</head><body>
-<h1>${h(titleStr)}</h1>
-<p class="sub">${h(subtitleStr)}</p>
-<table>
-<thead><tr><th>Section</th><th>Issue type</th><th>Student / Area</th><th>What to check</th><th>Suggested fix</th></tr></thead>
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${h(titleStr)}</title>
+<style>body{font-family:Arial,sans-serif;margin:40px;font-size:13px}h1{color:#1a3a5c}p.sub{color:#6b7280;margin:4px 0 20px}
+table{width:100%;border-collapse:collapse}thead th{background:#1a3a5c;color:#fff;padding:8px 12px;text-align:left;font-size:11px}
+tbody td{padding:8px 12px;border-bottom:1px solid #f0f4f8;vertical-align:top;line-height:1.5}
+.note{color:#6b7280;font-style:italic;font-size:12px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:12px}</style>
+</head><body><h1>${h(titleStr)}</h1><p class="sub">${h(subtitle)}</p>
+<table><thead><tr><th>Section</th><th>Issue type</th><th>Student / Area</th><th>What to check</th><th>Suggested fix</th></tr></thead>
 <tbody>${rows}</tbody></table>
 <p class="note">The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.</p>
 </body></html>`;
-  dlBlob(new Blob([html],{type:'text/html;charset=utf-8'}),titleStr.replace(/\s+/g,'_')+'_feedback.html');
+  dlBlob(new Blob([html],{type:'text/html;charset=utf-8'}), titleStr.replace(/\s+/g,'_')+'_feedback.html');
 }
 
-function downloadPdf(allIssues,titleStr,subtitleStr){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
-  const flat=flattenForExport(allIssues);
-  const date=new Date().toLocaleDateString('en-GB');
+function downloadPdf(allIssues, titleStr, subtitle){
+  const {jsPDF} = window.jspdf;
+  const doc  = new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
+  const flat = flatForExport(allIssues);
+  const date = new Date().toLocaleDateString('en-GB');
 
   doc.setFontSize(16); doc.setTextColor(26,58,92);
-  doc.text(titleStr,14,15);
+  doc.text(titleStr, 14, 15);
   doc.setFontSize(8); doc.setTextColor(80,80,80);
-  const subLines=doc.splitTextToSize(subtitleStr,260);
-  doc.text(subLines,14,22);
+  const subLines = doc.splitTextToSize(subtitle, 260);
+  doc.text(subLines, 14, 22);
   doc.setFontSize(7); doc.setTextColor(130,130,130);
-  doc.text(`Generated: ${date}`,14,22+subLines.length*4+2);
-
-  const startY=22+subLines.length*4+8;
+  doc.text(`Generated: ${date}`, 14, 22+subLines.length*4+2);
 
   doc.autoTable({
-    startY,
+    startY: 22+subLines.length*4+8,
     head:[['Section','Issue type','Student / Area','What to check','Suggested fix']],
-    body:flat.map(r=>[r.section,r.type,r.student,r.col1,r.col3]),
+    body: flat.map(r=>[r.section,r.type,r.student,r.check,r.fix]),
     theme:'striped',
     headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
-    bodyStyles:{fontSize:7,cellPadding:3,valign:'top',lineColor:[240,244,248],lineWidth:.2},
+    bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
     columnStyles:{
-      0:{cellWidth:22,textColor:[100,100,100]},
-      1:{cellWidth:28},
-      2:{cellWidth:32,fontStyle:'bold'},
-      3:{cellWidth:70},
-      4:{cellWidth:80,textColor:[22,101,52]},
+      0:{cellWidth:22},1:{cellWidth:26},2:{cellWidth:34},
+      3:{cellWidth:80},4:{cellWidth:70,textColor:[22,101,52]},
     },
     alternateRowStyles:{fillColor:[248,250,255]},
   });
 
-  const finalY=doc.lastAutoTable.finalY+6;
   doc.setFontSize(7); doc.setTextColor(100,100,100);
-  doc.text('The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.',14,finalY);
+  doc.text('The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.',
+    14, doc.lastAutoTable.finalY+7);
   doc.save(titleStr.replace(/\s+/g,'_')+'_feedback.pdf');
 }
 
@@ -1251,9 +1385,9 @@ function downloadPdf(allIssues,titleStr,subtitleStr){
    MAIN
 ═══════════════════════════════════════════════════════════════ */
 async function processFile(file){
-  const ext=file.name.split('.').pop().toLowerCase();
+  const ext = file.name.split('.').pop().toLowerCase();
   if(ext==='doc'){
-    alert('Please convert this file to .docx first.\n\nOpen it in Microsoft Word or Google Docs, then File → Save as .docx and try again.');
+    alert('Please convert this file to .docx first.\n\nOpen in Microsoft Word or Google Docs → File → Save as .docx, then upload again.');
     return;
   }
   if(ext!=='docx'&&ext!=='pdf'){
@@ -1261,101 +1395,102 @@ async function processFile(file){
     return;
   }
 
-  let fullText;
+  let fullText, parseResult;
+  const className     = document.getElementById('classNameInput').value.trim();
+  const classListRaw  = document.getElementById('classListInput').value.trim();
+  const manualRoster  = classListRaw
+    ? new Set(classListRaw.split('\n').map(s=>s.trim()).filter(s=>s.length>=2))
+    : new Set();
+
   try{
-    fullText = ext==='docx' ? await readDocx(file) : await readPdf(file);
+    if(ext==='docx'){
+      const html = await readDocxHtml(file);
+      parseResult = parseHtml(html, manualRoster);
+      // Also get plain text for spelling detection
+      fullText = parseResult.segments.map(s=>s.text).join('\n\n');
+    } else {
+      fullText = await readPdf(file);
+      const q  = checkPdfQuality(fullText);
+      if(q==='empty'){
+        alert('No text could be extracted from this PDF.\n\nThis is likely a scanned (image-only) PDF. Please export a text-based PDF or upload the .docx version.');
+        return;
+      }
+      if(q==='garbled'){
+        alert('This file could not be read clearly enough to check accurately.\n\nThe extracted text looks garbled — this often happens with scanned PDFs or PDFs from certain table layouts.\n\nPlease upload the .docx version for accurate results.');
+        return;
+      }
+      parseResult = parsePlainText(fullText, manualRoster);
+    }
   } catch(err){
     alert('Could not read this file. Make sure it is not password-protected.\n\nError: '+err.message);
     return;
   }
 
-  if(ext==='pdf'){
-    const q=checkPdfQuality(fullText);
-    if(q==='empty'){
-      alert('No text could be extracted from this PDF.\n\nThis is likely a scanned (image-only) PDF. Please export a text-based PDF or upload the .docx version.');
-      return;
-    }
-    if(q==='garbled'){
-      alert('This file could not be read clearly enough to check accurately.\n\nThe extracted text looks garbled or mixed up — this often happens with scanned PDFs or PDFs exported from table layouts.\n\nPlease upload the .docx version for accurate results.');
-      return;
-    }
-  }
-
-  const className   = document.getElementById('classNameInput').value.trim();
-  const classListRaw= document.getElementById('classListInput').value.trim();
-  const manualRoster= classListRaw
-    ? new Set(classListRaw.split('\n').map(s=>s.trim()).filter(s=>s.length>=2))
-    : new Set();
-
-  const spellingPref        = document.querySelector('input[name="spelling"]:checked')?.value||'auto';
-  const checkFirstPersonFlag= document.getElementById('chkFirstPerson').checked;
-  const checkLevelFlag      = document.getElementById('chkLevel').checked;
-
-  const {segments,roster}=parseSegments(fullText,manualRoster);
-
-  const warnings=[];
+  const { segments, roster } = parseResult;
+  const warnings = [];
   if(segments.length===0){
-    warnings.push('The app could not identify any student sections in this file. For best results, use a .docx file where each student\'s name appears as a clear heading on its own line, or paste your class list in the Settings panel.');
+    warnings.push('The app could not identify any student sections in this file. For best results, use a .docx file where each student\'s name appears as a clear heading on its own line, or paste your class list in the Settings panel above.');
   }
 
-  const {allIssues}=runAllChecks(segments,roster,fullText,{
-    spellingPref, checkFirstPersonFlag, checkLevelFlag
+  const spellingPref         = document.querySelector('input[name="spelling"]:checked')?.value||'auto';
+  const checkFirstPersonFlag = document.getElementById('chkFirstPerson').checked;
+  const checkLevelFlag       = document.getElementById('chkLevel').checked;
+
+  const { allIssues } = runAllChecks(segments, roster, fullText, {
+    spellingPref, checkFirstPersonFlag, checkLevelFlag,
   });
 
-  const subtitle='Only comments that need attention are included. Main report card comments were checked for name/pronoun consistency, spelling and UK/US consistency, professional report-card tone, first-person wording/contractions, grammar, punctuation, spacing, duplication, and comment/level alignment.';
+  const subtitle  = 'Only comments that need attention are included. Main report card comments were checked for name/pronoun consistency, spelling and UK/US consistency, professional report-card tone, first-person wording/contractions, grammar, punctuation, spacing, duplication, and comment/level alignment.';
+  const titleStr  = className ? `${className} Report Card Feedback` : 'Report Card Feedback';
 
   renderResults(allIssues, warnings, file.name, className);
 
-  // Wire downloads
-  const titleStr=className?`${className} Report Card Feedback`:'Report Card Feedback';
-  const pdfFn =()=>downloadPdf(allIssues,titleStr,subtitle);
-  const htmlFn=()=>downloadHtml(allIssues,titleStr,subtitle);
-  const csvFn =()=>downloadCsv(allIssues,titleStr);
-  ['dlPdf','dlPdf2'].forEach(id=>{const el=document.getElementById(id);if(el)el.onclick=pdfFn;});
-  ['dlHtml','dlHtml2'].forEach(id=>{const el=document.getElementById(id);if(el)el.onclick=htmlFn;});
-  ['dlCsv','dlCsv2'].forEach(id=>{const el=document.getElementById(id);if(el)el.onclick=csvFn;});
+  const pdfFn  = ()=>downloadPdf(allIssues, titleStr, subtitle);
+  const htmlFn = ()=>downloadHtml(allIssues, titleStr, subtitle);
+  const csvFn  = ()=>downloadCsv(allIssues, titleStr);
+  ['dlPdf','dlPdf2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=pdfFn; });
+  ['dlHtml','dlHtml2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=htmlFn; });
+  ['dlCsv','dlCsv2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=csvFn; });
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   EVENT LISTENERS
-═══════════════════════════════════════════════════════════════ */
+/* ─── EVENT LISTENERS ─────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded',()=>{
-  const fileInput    = document.getElementById('fileInput');
-  const dropZone     = document.getElementById('dropZone');
-  const fileNameEl   = document.getElementById('fileName');
-  const checkBtn     = document.getElementById('checkBtn');
-  const spinner      = document.getElementById('spinner');
-  const toggle       = document.getElementById('settingsToggle');
-  const panel        = document.getElementById('settingsPanel');
-  const arrow        = document.getElementById('settingsArrow');
-  let chosenFile=null;
+  const fileInput = document.getElementById('fileInput');
+  const dropZone  = document.getElementById('dropZone');
+  const fileNameEl= document.getElementById('fileName');
+  const checkBtn  = document.getElementById('checkBtn');
+  const spinner   = document.getElementById('spinner');
+  const toggle    = document.getElementById('settingsToggle');
+  const panel     = document.getElementById('settingsPanel');
+  const arrow     = document.getElementById('settingsArrow');
+  let chosenFile  = null;
 
   function setFile(f){
-    chosenFile=f;
-    fileNameEl.textContent=f?`Selected: ${f.name}`:'Accepts .pdf and .docx · For .doc files, save as .docx first';
-    checkBtn.disabled=!f;
+    chosenFile = f;
+    fileNameEl.textContent = f ? `Selected: ${f.name}` : 'Accepts .pdf and .docx · For .doc files, save as .docx first';
+    checkBtn.disabled = !f;
   }
 
   toggle.addEventListener('click',()=>{
-    const open=!panel.hidden;
-    panel.hidden=open;
-    toggle.setAttribute('aria-expanded',String(!open));
-    arrow.classList.toggle('open',!open);
+    const open = !panel.hidden;
+    panel.hidden = open;
+    toggle.setAttribute('aria-expanded', String(!open));
+    arrow.classList.toggle('open', !open);
   });
 
-  fileInput.addEventListener('change',()=>setFile(fileInput.files[0]||null));
-  dropZone.addEventListener('click',()=>fileInput.click());
-  dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('drag-over');});
-  dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('drag-over'));
-  dropZone.addEventListener('drop',e=>{
-    e.preventDefault();dropZone.classList.remove('drag-over');
-    const f=e.dataTransfer.files[0];if(f)setFile(f);
+  fileInput.addEventListener('change', ()=>setFile(fileInput.files[0]||null));
+  dropZone.addEventListener('click',   ()=>fileInput.click());
+  dropZone.addEventListener('dragover', e=>{ e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave',  ()=>dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e=>{
+    e.preventDefault(); dropZone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0]; if(f) setFile(f);
   });
 
-  checkBtn.addEventListener('click',async()=>{
-    if(!chosenFile)return;
-    checkBtn.disabled=true; spinner.hidden=false;
-    document.getElementById('resultsSection').hidden=true;
+  checkBtn.addEventListener('click', async()=>{
+    if(!chosenFile) return;
+    checkBtn.disabled = true; spinner.hidden = false;
+    document.getElementById('resultsSection').hidden = true;
     try{ await processFile(chosenFile); }
     finally{ spinner.hidden=true; checkBtn.disabled=false; }
   });
