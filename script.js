@@ -65,23 +65,62 @@ const TYPOS = [
 ];
 
 const TONE_FLAGS = [
-  { re:/\bstruggling\b/gi,         sug:'needs support with / is continuing to develop' },
-  { re:/\bchallenging\b/gi,        sug:'initially needed support with' },
-  { re:/\bweak\b/gi,               sug:'continuing to develop' },
-  { re:/\bpoor\b/gi,               sug:'developing' },
-  { re:/\blacks?\b/gi,             sug:'is developing / would benefit from' },
-  { re:/\bdifficult\b/gi,          sug:'has found it helpful to practise' },
-  { re:/\bdysregulat\w+/gi,        sug:'continuing to develop strategies to manage focus and emotions' },
-  { re:/\bdistracts? others?\b/gi, sug:'is developing awareness of classroom focus' },
-  { re:/\bbig feelings?\b/gi,      sug:'strong emotions / emotional responses' },
-  { re:/\bintelligence\b/gi,       sug:'reasoning skills / curiosity / insight' },
-  { re:/\btrue role model\b/gi,    sug:'a positive example to peers' },
-  { re:/\battendance and punctuality\b/gi, sug:'punctuality and consistency' },
-  { re:/\bpersonal boundaries?\b/gi, sug:'awareness of personal space and social cues' },
-  { re:/\brequires teacher assistance\b/gi, sug:'works with teacher support' },
+  // ── Struggling / difficulty ──
+  { re:/\bstruggles?\s+(with|to)\b/gi,      sug:'is continuing to develop / is working towards' },
+  { re:/\bstruggling\b/gi,                  sug:'needs support with / is continuing to develop' },
+  { re:/\bweak(ness|er|est)?\b/gi,          sug:'an area for growth / is continuing to develop' },
+  { re:/\blacks?\b/gi,                      sug:'is developing / would benefit from' },
+  { re:/\bhas\s+(difficulty|difficulties)\b/gi, sug:'is continuing to develop / is working towards' },
+  { re:/\bhaving\s+(difficulty|trouble|problems?|a\s+hard\s+time)\b/gi, sug:'is working towards / is developing' },
+  { re:/\bfinds?\b[^.!?]{0,60}\bchallenging\b/gi, sug:'"finds X challenging" — say what the student is working on instead: e.g. "is developing confidence with..."' },
+  { re:/\bfound\b[^.!?]{0,50}\bchallenging\b/gi,  sug:'needed additional support with / was working towards' },
+  { re:/\b(he|she|they)\b[^.!?]{0,40}\bchallenging\b/gi, sug:'describe what the student is working on rather than how they find it' },
+  { re:/\bdifficult\s+for\s+(him|her|them)\b/gi,  sug:'an area the student is working on / continuing to develop' },
+  { re:/\bcannot\s+(yet\s+)?(do|read|write|add|subtract|multiply|work|complete|solve|understand|apply)\b/gi, sug:'"is developing the ability to..." or "is working towards..."' },
+  { re:/\bunable\s+to\b/gi,                 sug:'"is working towards" / "is developing the ability to"' },
+  { re:/\bnot\s+yet\s+(able|ready|at)\b/gi, sug:'"is working towards" / "is developing"' },
+  // ── Negative labels / character judgements ──
+  { re:/\blazy\b/gi,                         sug:'is developing independence and self-motivation' },
+  { re:/\bcareless(ly|ness)?\b/gi,           sug:'is developing attention to detail' },
+  { re:/\bimmature\b/gi,                     sug:'is developing social and emotional awareness' },
+  { re:/\birresponsible\b/gi,                sug:'is developing responsibility and self-management' },
+  { re:/\bsloppy\b/gi,                       sug:'is developing care and attention in their work' },
+  { re:/\bchaotic\b/gi,                      sug:'is developing organisation and planning skills' },
+  { re:/\bpoor\s+(behaviour|behavior|attitude|choices?|effort|work\s+ethic)\b/gi, sug:'is developing positive learning habits' },
+  // ── Behaviour language ──
+  { re:/\bdisruptive\b/gi,                   sug:'is developing self-management and focus strategies' },
+  { re:/\bdysregulat\w+/gi,                  sug:'is developing strategies to manage focus and emotions' },
+  { re:/\bdistracts?\s+(the\s+class|other\s+students?|peers?|classmates?|others?)\b/gi, sug:'is developing awareness of how their choices affect the learning of others' },
+  { re:/\bdisengaged?\b/gi,                  sug:'is developing strategies for focus and engagement' },
+  { re:/\binattentive\b/gi,                  sug:'is continuing to develop focus during learning time' },
+  { re:/\brefuses?\s+to\b/gi,               sug:'is working towards / is developing the habit of' },
+  { re:/\bshows?\s+no\s+(interest|effort|motivation|engagement|willingness)\b/gi, sug:'is developing engagement with / would benefit from...' },
+  { re:/\bgives?\s+up\b/gi,                  sug:'is developing persistence and resilience' },
+  { re:/\bdoes\s+not\s+(listen|try|engage|focus|participate|complete|submit|follow)\b/gi, sug:'is continuing to develop [skill] — rephrase as a growth goal' },
+  { re:/\bnever\s+(listens?|tries?|engages?|focuses?|completes?|submits?|participates?|follows?)\b/gi, sug:'avoid "never" — rephrase as "is continuing to develop [habit/skill]"' },
+  { re:/\bcan\s*not\s+(focus|listen|sit\s+still|work\s+independently|manage|control|behave)\b/gi, sug:'is developing strategies for [skill]' },
+  { re:/\balways\s+(misbehaves?|forgets?|fails?\s+to|refuses?|loses?|disrupts?|argues?)\b/gi, sug:'avoid "always" with negative behaviour — describe what the student is working towards instead' },
+  { re:/\bconstantly\s+(misbehaves?|forgets?|fails?\s+to|refuses?|disrupts?|argues?)\b/gi, sug:'avoid "constantly" with negatives — rephrase as a growth goal' },
+  { re:/\bhard\s+to\s+(manage|reach|engage|motivate|teach)\b/gi, sug:'is continuing to develop [skill] — rephrase from the student\'s perspective' },
+  // ── Clinical / diagnostic labels ──
+  { re:/\bdyslex\w+/gi,  sug:'avoid clinical or diagnostic labels in report comments — speak to the learning support coordinator' },
+  { re:/\bADHD\b/gi,     sug:'avoid clinical labels in report comments — speak to the learning support coordinator' },
+  { re:/\bautis\w+/gi,   sug:'avoid clinical labels in report comments — speak to the learning support coordinator' },
+  { re:/\bdyscalcul\w+/gi, sug:'avoid clinical labels in report comments — speak to the learning support coordinator' },
+  // ── Tone / framing ──
+  { re:/\bbig feelings?\b/gi,                sug:'strong emotions / emotional responses' },
+  { re:/\bintelligence\b/gi,                 sug:'reasoning skills / curiosity / insight' },
+  { re:/\btrue role model\b/gi,              sug:'a positive example to peers' },
+  { re:/\battendance and punctuality\b/gi,   sug:'punctuality and consistency' },
+  { re:/\bpersonal boundaries?\b/gi,         sug:'awareness of personal space and social cues' },
+  { re:/\brequires?\s+teacher\s+assistance\b/gi, sug:'works with teacher support' },
+  { re:/\bnot\s+a\s+(strong|good|great|natural)\s+(student|learner|reader|writer|mathematician)\b/gi, sug:'describe what the student is working on rather than labelling ability' },
+  { re:/\bbelow\s+(grade|year|level)\b/gi,   sug:'describe what the student is working towards rather than comparing to grade level' },
+  { re:/\babove\s+(grade|year|level)\b/gi,   sug:'describe what the student does rather than comparing to grade level' },
 ];
 
-const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+(student|learner|child|language\s+student|reader|writer|mathematician)\b/gi;
+// Level used as a descriptor — ANY form (positive or negative — none should appear in comments)
+const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding|secure)\s+(student|learner|child|language\s+learner?|reader|writer|mathematician|thinker|communicator|inquirer|scientist|artist)\b/gi;
 
 /* ═══════════════════════════════════════════════════════════
    HELPERS
@@ -742,20 +781,33 @@ function checkSpellingConsistency(allComments, pref){
 /* E. Grammar and punctuation ─────────────────────────────── */
 const GRAMMAR_CHECKS = [
   // Missing space after full stop
-  { re:/([a-z]\.)([A-Z])/g, fix:(m,a,b)=>`${a} ${b}`, type:'Missing space after full stop', desc:(m)=>`"${m[0]}" — missing space` },
-  // Extra punctuation
-  { re:/([.!?,])\s*\1+/g, fix:(m,a)=>a, type:'Duplicate punctuation', desc:(m)=>`"${m[0]}" — duplicate punctuation mark` },
-  // Extra space before punctuation
-  { re:/\s+([.,;:!?])/g, fix:(m,a)=>a, type:'Space before punctuation', desc:(m)=>`"${m[0]}" — extra space before punctuation` },
+  { re:/([a-z]\.)([A-Z])/g,    fix:(m,a,b)=>`${a} ${b}`, type:'Missing space after full stop', desc:(m)=>`"${m[0]}" — no space between sentences` },
+  // Double full stop / ellipsis misuse
+  { re:/\.{2}(?!\.)/g,         fix:()=>'.', type:'Double full stop', desc:(m)=>`"${m[0]}" — use a single full stop` },
+  // Triple+ full stops used as ellipsis (4+)
+  { re:/\.{4,}/g,              fix:()=>'…', type:'Too many full stops', desc:(m)=>`"${m[0]}" — use "…" or restructure` },
+  // Double comma
+  { re:/,{2,}/g,               fix:()=>',', type:'Double comma', desc:(m)=>`"${m[0]}" — remove the extra comma` },
+  // Other duplicate punctuation (!!, ??, ;;)
+  { re:/([!?;])\1+/g,         fix:(m,a)=>a, type:'Duplicate punctuation', desc:(m)=>`"${m[0]}" — use only one` },
+  // Space before punctuation
+  { re:/\s+([.,;:!?])/g,      fix:(m,a)=>a, type:'Space before punctuation', desc:(m)=>`"${m[0]}" — remove the space before punctuation` },
+  // Missing space after comma
+  { re:/,([A-Za-z])/g,        fix:(m,a)=>`, ${a}`, type:'Missing space after comma', desc:(m)=>`"${m[0]}" — add a space after the comma` },
+  // Missing space after semicolon
+  { re:/;([A-Za-z])/g,        fix:(m,a)=>(`; ${a}`), type:'Missing space after semicolon', desc:(m)=>`"${m[0]}" — add a space after the semicolon` },
   // Double space
-  { re:/([^\s])\s{2,}([^\s])/g, fix:(m,a,b)=>`${a} ${b}`, type:'Extra space', desc:(m)=>`double space in text` },
-  // Duplicate words
-  { re:/\b(and|the|is|a|an|to|of|in|for|on|at|with|that|this|or|but|as|if|by|from|up)\s+\1\b/gi,
-    fix:(m,a)=>a, type:'Duplicate word', desc:(m)=>`"${m[0]}" — repeated word` },
-  // Missing article (basic)
-  { re:/\bWhile (he|she|they) is (highly )?(independent|confident|capable|creative|curious)\s+learner\b/gi,
-    fix:(m,p,q,adj)=>`While ${p} is ${q||''}a${adj.match(/^[aeiou]/i)?'n':''} ${adj} learner`,
-    type:'Missing article', desc:(m)=>`"${m[0]}" — missing article "a/an"` },
+  { re:/([^\s])\s{2,}([^\s])/g, fix:(m,a,b)=>`${a} ${b}`, type:'Extra space', desc:()=>`double space between words` },
+  // Duplicate common words
+  { re:/\b(and|the|is|a|an|to|of|in|for|on|at|with|that|this|or|but|as|if|by|from|up|her|his|their)\s+\1\b/gi,
+    fix:(m,a)=>a, type:'Duplicate word', desc:(m)=>`"${m[0]}" — word repeated` },
+  // Missing article before learner/student
+  { re:/\b(is|was|became?)\s+(highly\s+)?(independent|confident|capable|creative|curious|motivated|engaged)\s+learner\b/gi,
+    fix:(m,v,q,adj)=>`${v} ${q||''}a${adj.match(/^[aeiou]/i)?'n':''} ${adj} learner`,
+    type:'Missing article', desc:(m)=>`"${m[0]}" — missing "a/an" before "learner"` },
+  // Comma splice (very basic: two complete-looking clauses joined by comma only)
+  { re:/[a-z]{3,},\s+(he|she|they|it|this|these|Alex|the\s+student)\s+(is|was|has|can|will|did|does)\b/gi,
+    fix:null, type:'Possible comma splice', desc:(m)=>`"${m[0]}" — consider using a full stop or semicolon instead of a comma here` },
 ];
 
 function checkGrammar(seg){
@@ -771,13 +823,21 @@ function checkGrammar(seg){
       const m = check.re.exec(sent);
       if(m && !seen.has(check.type + m[0])){
         seen.add(check.type + m[0]);
-        const fixed = typeof check.fix === 'function' ? sent.replace(new RegExp(check.re.source, check.re.flags), check.fix) : sent;
+        let suggestedFix;
+        if(check.fix === null){
+          suggestedFix = check.desc(m);
+        } else if(check.type === 'Duplicate word'){
+          suggestedFix = `Remove one "${m[1]}"`;
+        } else {
+          const fixed = sent.replace(new RegExp(check.re.source, check.re.flags), check.fix);
+          suggestedFix = `"${fixed.trim()}"`;
+        }
         issues.push({
           section: check.type === 'Duplicate word' ? 'duplication' : 'grammar',
           type: check.type,
           studentArea:`${studentName} — ${reportArea}`,
           whatToCheck: check.desc(m),
-          suggestedFix: check.type === 'Duplicate word' ? `Remove one "${m[1]}"` : `"${fixed.trim()}"`,
+          suggestedFix,
         });
       }
     }
@@ -820,12 +880,18 @@ function checkTone(seg){
         return hit;
       }) || comment.slice(0,120);
       re.lastIndex = 0;
+      const isBehaviour = /disruptive|dysregulat|distracts?|disengaged?|inattentive|lazy|careless|immature|irresponsible|refuses?|no effort|does not (listen|try|engage)|never (listens?|tries?)|gives? up|hard to (manage|reach)|always (misbehaves?|refuses?)|constantly (misbehaves?|refuses?)/i.test(m[0]);
+      const isClinical  = /dyslex|ADHD|autis|dyscalcul/i.test(m[0]);
       issues.push({
         section:'tone',
-        type:'Sensitive wording',
+        type: isClinical ? 'Clinical label' : isBehaviour ? 'Behaviour language' : 'Negative wording',
         studentArea:`${studentName} — ${reportArea}`,
-        currentWording: `"${sent.trim().slice(0,100)}"`,
-        concern: `"${m[0]}" may be too direct or negative for a parent report.`,
+        currentWording: `"${sent.trim().slice(0,110)}"`,
+        concern: isClinical
+          ? `"${m[0]}" is a clinical/diagnostic term — these should not appear in report comments.`
+          : isBehaviour
+          ? `"${m[0]}" describes behaviour in a way that may be inappropriate in a written parent report.`
+          : `"${m[0]}" may read as negative or discouraging to a parent or student.`,
         suggestedWording: `Consider: ${sug}`,
       });
     }
@@ -993,22 +1059,32 @@ function checkLevelLabel(seg){
       section:'biggest', type:'Level label as description',
       studentArea:`${studentName} — ${reportArea}`,
       whatToCheck:`"${m[0].trim()}"`,
-      suggestedFix:`Do not use the student's level as a descriptor. Describe what they do: e.g. "demonstrates strong understanding of..." or name the specific skill.`,
+      suggestedFix:`Do not label a student by their level — this applies to all levels (emerging, developing, achieving, extending). Describe what they actually do: e.g. "demonstrates strong understanding of…" or "is developing confidence with…"`,
     });
   }
   return issues;
 }
 
 /* K. Level alignment ─────────────────────────────────────── */
-const STRONG_WORDS = /\b(exceptional|exemplary|outstanding|remarkable|insightful|extraordinary|mastery|sophisticated|beyond expectations|extends beyond)\b/gi;
-const WEAK_WORDS   = /\b(beginning to|rarely|seldom|with significant support|not yet|unable to)\b/gi;
+
+// Words that suggest high achievement — odd in Developing/Emerging comments
+const STRONG_WORDS = /\b(exceptional|exemplary|outstanding|remarkable|insightful|extraordinary|mastery|sophisticated|beyond expectations?|extends? beyond|excellent(?:ly)?|impressively?|consistently exceeds?|highly capable|advanced understanding|in[\s-]depth understanding|impressive depth|leads? the class|independently and confidently|deep understanding|thorough(ly)?|nuanced)\b/gi;
+
+// Words that suggest struggle — odd in Achieving/Extending comments
+const WEAK_WORDS = /\b(beginning to|rarely|seldom|with significant support|not yet|unable to|struggles? with|finds? it difficult|cannot yet|with a great deal of support|with considerable support|has not yet|requires? constant support|needs frequent reminders?|finds? it hard to|is not yet able|has difficulty)\b/gi;
+
+// Words that suggest still-developing — odd in Extending comments specifically
+const DEVELOPING_WORDS = /\b(is starting to|is beginning to|is attempting to|is trying to|is working towards|with guidance|with teacher support|with prompting|needs? reminders?|is learning to|is practising)\b/gi;
 
 function checkLevelAlignment(seg){
   const { studentName, reportArea, comment, level } = seg;
   if(!level) return [];
   const issues = [];
 
-  if(/^(Developing|Emerging)$/i.test(level)){
+  const lvlLower = level.toLowerCase();
+
+  // Emerging/Developing: strong language is suspicious
+  if(/^(developing|emerging|beginning|approaching)$/i.test(level)){
     STRONG_WORDS.lastIndex = 0;
     const m = STRONG_WORDS.exec(comment);
     if(m){
@@ -1016,13 +1092,14 @@ function checkLevelAlignment(seg){
         section:'level', type:'Level alignment',
         studentArea:`${studentName} — ${reportArea}`,
         visibleLevel: level,
-        whyCheck:`Comment uses "${m[0]}" but the level is ${level}.`,
-        possibleAction:`Either adjust the level upward or soften the wording to match a ${level} level.`,
+        whyCheck:`Comment uses "${m[0]}" but the level is ${level} — this language usually suits a higher level.`,
+        possibleAction:`Either raise the level or soften the language to match a ${level} comment (e.g. "is developing confidence with…").`,
       });
     }
   }
 
-  if(/^(Achieving|Extending)$/i.test(level)){
+  // Achieving/Extending: weak/struggling language is suspicious
+  if(/^(achieving|extending|exceeding|meeting|secure)$/i.test(level)){
     WEAK_WORDS.lastIndex = 0;
     const m = WEAK_WORDS.exec(comment);
     if(m){
@@ -1030,8 +1107,23 @@ function checkLevelAlignment(seg){
         section:'level', type:'Level alignment',
         studentArea:`${studentName} — ${reportArea}`,
         visibleLevel: level,
-        whyCheck:`Comment uses "${m[0]}" but the level is ${level}.`,
-        possibleAction:`Either adjust the level downward or revise the wording to reflect the ${level} level.`,
+        whyCheck:`Comment uses "${m[0]}" but the level is ${level} — this language usually suits a lower level.`,
+        possibleAction:`Either lower the level or revise the language to reflect ${level} performance (e.g. describe what the student does confidently).`,
+      });
+    }
+  }
+
+  // Extending specifically: still-developing language is suspicious
+  if(/^(extending|exceeding)$/i.test(level)){
+    DEVELOPING_WORDS.lastIndex = 0;
+    const m = DEVELOPING_WORDS.exec(comment);
+    if(m && !issues.length){
+      issues.push({
+        section:'level', type:'Level alignment',
+        studentArea:`${studentName} — ${reportArea}`,
+        visibleLevel: level,
+        whyCheck:`"${m[0]}" suggests the student is still developing, but the level is ${level}.`,
+        possibleAction:`For an ${level} student, describe what they do independently and confidently rather than what they are working towards.`,
       });
     }
   }
@@ -1085,7 +1177,7 @@ function consolidate(issues){
       section:'biggest', type:'Level label as description',
       studentArea:'Whole document',
       whatToCheck:`${lblIdx.length} comments use a level label as a description (${examples.map(e=>`"${e}"`).join(', ')}…).`,
-      suggestedFix:`Do not describe students by their level label. Describe what they do instead.`,
+      suggestedFix:`Do not label students by their level (emerging, developing, achieving, extending, etc.). Describe what the student actually does or is working on instead.`,
     });
     lblIdx.forEach(idx=>skipIdx.add(idx));
   }
