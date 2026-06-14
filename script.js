@@ -1,27 +1,11 @@
-/* ═══════════════════════════════════════════════════════════════
-   REPORT CARD CHECKER — script.js
-
-   OUTPUT FORMAT: mirrors the Y5JK human proofreader style
-   · Table 1 — Things to review (grammar, consistency, names)
-       cols: Student / Area | Issue type | Current issue | Suggested fix
-       "Whole document" rows at top when 3+ students share a pattern
-   · Table 2 — Tone and wording to soften
-       cols: Student / Area | Issue type | Current wording | Suggested fix
-   · Table 3 — Comment and level alignment
-       cols: Student / Area | Visible level | Why to check | Possible action
-
-   ACCURACY RULES
-   · PDF table: extract by column, never by Y-row
-   · Every issue quotes the exact sentence from the report
-   · Every suggested fix is the exact corrected sentence
-   · Only flag high-confidence issues
-   · Student / Area format: "Name - Area" (hyphen)
-   · 3+ students with the same issue → one "Whole document" row
-═══════════════════════════════════════════════════════════════ */
-
 'use strict';
 
-/* ─── WORDS THAT CANNOT BE STUDENT NAMES ─────────────────── */
+/* ═══════════════════════════════════════════════════════════
+   CONSTANTS
+═══════════════════════════════════════════════════════════ */
+
+const WNS = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
+
 const NOT_NAMES = new Set([
   'Term','Report','Reports','Card','Cards','Year','Unit','Inquiry','Inquirer',
   'UOI','EAL','ATL','IB','PYP','STEM','PE','Art','Science','Music','Drama',
@@ -42,474 +26,521 @@ const NOT_NAMES = new Set([
   'After','Before','Also','Both','Each','Such','His','Her','Its','Our',
   'She','He','Spring','Autumn','Summer','Winter','Semester','Quarter',
   'Social','Self','Management','Thinking','Arts','General','Moving','Next',
-  'Ascot','Google','Doc','Statistics','Probability','Forces','Friction',
-  'Gravity','Ancient','Rome','Roman','Story','Mountain','Position','Number',
-  'Shape','Space','Data','Handling','Operations','Fractions','Measurement',
-  'Geometry','Algebra','The','And','But','For','Not','Beginning','End',
-  'First','Last','New','Good','Well','Just','Only','How','Why',
-  'Every','All','Whole','Each','Some','Many',
+  'Statistics','Probability','Forces','Friction','Gravity','Ancient','Rome',
+  'Roman','Story','Mountain','Position','Number','Shape','Space','Data',
+  'Handling','Operations','Fractions','Measurement','Geometry','Algebra',
+  'The','And','But','For','Not','First','Last','New','Good','Well',
+  'Just','Only','Every','All','Whole','Some','Many','Name','Student',
+  'Ascot','Google','Doc','Google','Term','Third','Second','First',
 ]);
 
-const KNOWN_SUBJECTS = new Set([
-  'Math','Maths','Mathematics','Language','English','Literacy',
-  'Reading','Writing','UOI','Unit','Inquiry','Learner','Learning',
-  'Science','Specialist','Art','Music','Drama','PE','PSPE','Social',
-]);
-
-/* ─── AREA NORMALISATION ──────────────────────────────────── */
-function normaliseSubject(t){
-  t = t.trim();
-  if(/math|numer/i.test(t))       return 'Math';
-  if(/language|english|literac|reading|writing/i.test(t)) return 'Language';
-  if(/uoi|unit\s+of|inquiry|central\s+idea/i.test(t)) return 'UOI';
-  if(/learner|personal\s+social|sal\b/i.test(t)) return 'Learner';
-  if(/science/i.test(t))          return 'Science';
-  if(/specialist|music\b|drama\b|art\b|pe\b|pspe|physical\s+ed|computing|library/i.test(t)) return 'Specialist';
-  return t;
-}
-
-function detectAreaFromText(text){
-  if(/\bmath/i.test(text)||/\bstatistics\b|\bprobability\b|\bfraction|\bgeometry|\bmeasurement/i.test(text)) return 'Math';
-  if(/\blanguage\b|\bwriting\b|\breading\b|\bliteracy|\bhistorical\s+fiction|\bpersuasive/i.test(text)) return 'Language';
-  if(/\binquiry\b|\buoi\b|\bunit\s+of|\blandform|\bcentral\s+idea/i.test(text)) return 'UOI';
-  return 'General';
-}
-
-/* ─── UK/US PAIRS ─────────────────────────────────────────── */
-const UK_US = [
-  { us:/\borganiz(e|es|ed|ing|ation|ational)\b/gi, uk:/\borganis(e|es|ed|ing|ation|ational)\b/gi, usW:'organize', ukW:'organise' },
-  { us:/\banalyz(e|es|ed|ing)\b/gi,   uk:/\banalys(e|es|ed|ing)\b/gi,   usW:'analyze',  ukW:'analyse'  },
-  { us:/\brecogniz(e|es|ed|ing)\b/gi, uk:/\brecognis(e|es|ed|ing)\b/gi, usW:'recognize',ukW:'recognise'},
-  { us:/\bsummariz(e|es|ed|ing)\b/gi, uk:/\bsummaris(e|es|ed|ing)\b/gi, usW:'summarize',ukW:'summarise'},
-  { us:/\butiliz(e|es|ed|ing)\b/gi,   uk:/\butilis(e|es|ed|ing)\b/gi,   usW:'utilize',  ukW:'utilise'  },
-  { us:/\bbehavior(s|al)?\b/gi,       uk:/\bbehaviour(s|al)?\b/gi,      usW:'behavior', ukW:'behaviour'},
-  { us:/\bcenter(s|ed)?\b/gi,         uk:/\bcentre(s|d)?\b/gi,          usW:'center',   ukW:'centre'   },
-  { us:/\bcolor(s|ed|ful)?\b/gi,      uk:/\bcolour(s|ed|ful)?\b/gi,     usW:'color',    ukW:'colour'   },
-  { us:/\bfavorite(s)?\b/gi,          uk:/\bfavourite(s)?\b/gi,         usW:'favorite', ukW:'favourite'},
-  { us:/\blabor(s|ed)?\b/gi,          uk:/\blabour(s|ed)?\b/gi,         usW:'labor',    ukW:'labour'   },
-  { us:/\bpracticing\b/gi,            uk:/\bpractising\b/gi,            usW:'practicing',ukW:'practising'},
-  { us:/\bprogram(s|med|ming)?\b/gi,  uk:/\bprogramme(s|d|ming)?\b/gi,  usW:'program',  ukW:'programme'},
-  { us:/\bmodeling\b/gi,              uk:/\bmodelling\b/gi,             usW:'modeling', ukW:'modelling'},
+const UK_US_PAIRS = [
+  { uk:/\borganis(e|es|ed|ing|ation|ational)\b/gi, us:/\borganiz(e|es|ed|ing|ation|ational)\b/gi, ukW:'organise', usW:'organize' },
+  { uk:/\banalys(e|es|ed|ing)\b/gi, us:/\banalyz(e|es|ed|ing)\b/gi, ukW:'analyse', usW:'analyze' },
+  { uk:/\bcolour(s|ed|ful)?\b/gi,   us:/\bcolor(s|ed|ful)?\b/gi,   ukW:'colour',  usW:'color'   },
+  { uk:/\bbehaviour(s|al)?\b/gi,    us:/\bbehavior(s|al)?\b/gi,    ukW:'behaviour',usW:'behavior'},
+  { uk:/\bcentre(s|d)?\b/gi,        us:/\bcenter(s|ed)?\b/gi,      ukW:'centre',  usW:'center'  },
+  { uk:/\brecognis(e|es|ed|ing)\b/gi,us:/\brecogniz(e|es|ed|ing)\b/gi,ukW:'recognise',usW:'recognize'},
+  { uk:/\bsummaris(e|es|ed|ing)\b/gi,us:/\bsummariz(e|es|ed|ing)\b/gi,ukW:'summarise',usW:'summarize'},
+  { uk:/\butilis(e|es|ed|ing)\b/gi, us:/\butiliz(e|es|ed|ing)\b/gi,ukW:'utilise', usW:'utilize' },
+  { uk:/\blabour(s|ed)?\b/gi,       us:/\blabor(s|ed)?\b/gi,       ukW:'labour',  usW:'labor'   },
+  { uk:/\bfavourite(s)?\b/gi,       us:/\bfavorite(s)?\b/gi,       ukW:'favourite',usW:'favorite'},
+  { uk:/\bpractising\b/gi,          us:/\bpracticing\b/gi,         ukW:'practising',usW:'practicing'},
+  { uk:/\bprogramme(s)?\b/gi,       us:/\bprogram(s)?\b/gi,        ukW:'programme',usW:'program' },
+  { uk:/\bmodelling\b/gi,           us:/\bmodeling\b/gi,           ukW:'modelling',usW:'modeling'},
+  { uk:/\bmaths\b/gi,               us:/\bmath\b/gi,               ukW:'maths',   usW:'math'    },
 ];
 
-/* ─── KNOWN SPELLING ERRORS ───────────────────────────────── */
 const TYPOS = [
   ['recieve','receive'],['recieved','received'],['acheive','achieve'],
   ['acheivement','achievement'],['occured','occurred'],['seperate','separate'],
-  ['accomodate','accommodate'],['beleive','believe'],['definately','definitely'],
-  ['enviroment','environment'],['grammer','grammar'],['independant','independent'],
-  ['knowlege','knowledge'],['neccessary','necessary'],['perseverence','perseverance'],
-  ['reccommend','recommend'],['resiliance','resilience'],
+  ['beleive','believe'],['definately','definitely'],['enviroment','environment'],
+  ['grammer','grammar'],['independant','independent'],['neccessary','necessary'],
+  ['perseverence','perseverance'],['resiliance','resilience'],
   ['communcation','communication'],['collaberation','collaboration'],
   ['succesful','successful'],['untill','until'],['writting','writing'],
   ['develope','develop'],['managment','management'],['relfection','reflection'],
-  ['experiance','experience'],['thier','their'],['truely','truly'],
-  ['leanring','learning'],['apporach','approach'],['colaborate','collaborate'],
+  ['experiance','experience'],['thier','their'],['leanring','learning'],
+  ['apporach','approach'],['colaborate','collaborate'],['truely','truly'],
 ];
 
-/* ─── HELPERS ─────────────────────────────────────────────── */
-function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
-function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function wc(t)   { return (t.match(/\b[a-zA-Z]+\b/g)||[]).length; }
-function cap(s)  { return s.charAt(0).toUpperCase() + s.slice(1); }
+const TONE_FLAGS = [
+  { re:/\bstruggling\b/gi,         sug:'needs support with / is continuing to develop' },
+  { re:/\bchallenging\b/gi,        sug:'initially needed support with' },
+  { re:/\bweak\b/gi,               sug:'continuing to develop' },
+  { re:/\bpoor\b/gi,               sug:'developing' },
+  { re:/\blacks?\b/gi,             sug:'is developing / would benefit from' },
+  { re:/\bdifficult\b/gi,          sug:'has found it helpful to practise' },
+  { re:/\bdysregulat\w+/gi,        sug:'continuing to develop strategies to manage focus and emotions' },
+  { re:/\bdistracts? others?\b/gi, sug:'is developing awareness of classroom focus' },
+  { re:/\bbig feelings?\b/gi,      sug:'strong emotions / emotional responses' },
+  { re:/\bintelligence\b/gi,       sug:'reasoning skills / curiosity / insight' },
+  { re:/\btrue role model\b/gi,    sug:'a positive example to peers' },
+  { re:/\battendance and punctuality\b/gi, sug:'punctuality and consistency' },
+  { re:/\bpersonal boundaries?\b/gi, sug:'awareness of personal space and social cues' },
+  { re:/\brequires teacher assistance\b/gi, sug:'works with teacher support' },
+];
 
-/* Returns true only if t looks like a real student name (1–4 title-case words,
-   no punctuation, first word not a known non-name keyword). Used to validate
-   PDF col0 text before treating it as a student name. */
+const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+(student|learner|child|language\s+student|reader|writer|mathematician)\b/gi;
+
+/* ═══════════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════════ */
+
+function escRe(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'); }
+function h(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function wc(t){ return (t.match(/\b[a-zA-Z]+\b/g)||[]).length; }
+function cap(s){ return s ? s.charAt(0).toUpperCase()+s.slice(1) : s; }
+
 function isLikelyStudentName(t){
   if(!t || t.length < 2 || t.length > 45) return false;
   if(/[.!?,;:–—()\[\]{}0-9]/.test(t)) return false;
   const words = t.trim().split(/\s+/);
   if(words.length < 1 || words.length > 4) return false;
-  if(!words.every(w => /^[A-Z][a-zA-Z''-]{0,20}$/.test(w))) return false;
+  if(!words.every(w => /^[A-Z][a-zA-Z'''\-]{0,25}$/.test(w))) return false;
   if(NOT_NAMES.has(words[0])) return false;
+  if(isKnownArea(words[0])) return false;
   if(words[0].length < 2) return false;
   return true;
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   PDF READING — COLUMN-AWARE TABLE EXTRACTION
-═══════════════════════════════════════════════════════════════ */
-async function readPdfRaw(file){
+function normaliseArea(raw){
+  const t = (raw||'').trim();
+  if(/math|numer/i.test(t))                          return 'Math';
+  if(/language|english|literac|reading|writing/i.test(t)) return 'Language';
+  if(/uoi|unit\s+of|inquiry|central\s+idea/i.test(t)) return 'UOI';
+  if(/learner|personal\s+social|student\s+as\s+a?\s*learner/i.test(t)) return 'Learner';
+  if(/science/i.test(t))                              return 'Science';
+  if(/specialist|music\b|drama\b|art\b|pe\b|pspe|physical\s+ed|computing|library/i.test(t)) return 'Specialist';
+  return t;
+}
+
+function isKnownArea(t){
+  const n = normaliseArea(t);
+  return ['Math','Language','UOI','Learner','Science','Specialist'].includes(n);
+}
+
+function extractLevel(text){
+  const m = (text||'').match(/\b(Emerging|Developing|Achieving|Extending|Secure|Beginning|Approaching|Meeting|Exceeding)\b/);
+  return m ? m[1] : null;
+}
+
+function splitSentences(text){
+  const parts = text.match(/[^.!?]+(?:[.!?]+(?=\s+[A-Z]|\s*$)|[.!?]+)/g)||[text];
+  return parts.map(s=>s.trim()).filter(s=>s.length>10 && wc(s)>=4);
+}
+
+function isUsableSentence(s){
+  if(!s || wc(s)<4) return false;
+  if(/[A-Z]{5,}/.test(s)) return false;
+  if(/\w{20,}/.test(s)) return false;
+  const ws = s.split(/\s+/);
+  const avg = ws.reduce((x,w)=>x+w.replace(/[^a-zA-Z]/g,'').length,0)/ws.length;
+  return avg >= 2 && avg <= 12;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   GARBLED TEXT DETECTION
+   Skip rather than check messy extracted text.
+═══════════════════════════════════════════════════════════ */
+
+function isGarbled(text){
+  if(!text || text.length < 10) return true;
+
+  // Repeated level labels: "Developing Developing"
+  if(/(Developing|Achieving|Emerging|Extending|Secure)\s+\1/i.test(text)) return true;
+
+  // Contains document headings inside supposed comment
+  if(/Term\s+\d+\s+Report/i.test(text)) return true;
+  if(/\bStudent\s+Name\b|\bReport\s+Area\b|\bClass\s+List\b/i.test(text)) return true;
+
+  // 3+ different subjects mentioned — likely merged columns
+  const subjectHits = ['\\bMath\\b','\\bLanguage\\b','\\bUOI\\b','\\bLearner\\b','\\bScience\\b']
+    .filter(p => new RegExp(p,'i').test(text)).length;
+  if(subjectHits >= 3) return true;
+
+  // Many roster names before first sentence (copy-paste row merge)
+  const words = text.split(/\s+/);
+  const leadingCaps = words.slice(0,8).filter(w => /^[A-Z][a-z]+$/.test(w) && !NOT_NAMES.has(w)).length;
+  if(leadingCaps >= 4) return true;
+
+  // No normal sentence structure (very high caps-word ratio)
+  const capsRatio = words.filter(w=>/^[A-Z]{2,}$/.test(w)).length / words.length;
+  if(capsRatio > 0.35 && words.length > 6) return true;
+
+  // Too many level words in short text
+  const levelCount = (text.match(/\b(Developing|Achieving|Emerging|Extending|Secure)\b/gi)||[]).length;
+  if(levelCount >= 3 && text.length < 250) return true;
+
+  return false;
+}
+
+/* ═══════════════════════════════════════════════════════════
+   DOCX PARSING  (JSZip + DOMParser, table-aware)
+═══════════════════════════════════════════════════════════ */
+
+function getW(el, tag){ return Array.from(el.getElementsByTagNameNS(WNS, tag)); }
+
+function cellText(tc){
+  return getW(tc,'p')
+    .map(p => getW(p,'r').map(r => getW(r,'t').map(t=>t.textContent).join('')).join(''))
+    .join(' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+async function parseDocxRows(file, manualRoster){
+  let xmlStr;
+  try {
+    const zip = await JSZip.loadAsync(await file.arrayBuffer());
+    const entry = zip.file('word/document.xml');
+    if(!entry) throw new Error('No document.xml in .docx');
+    xmlStr = await entry.async('string');
+  } catch(e){
+    throw new Error('Could not open .docx file. Make sure it is a valid Word document.');
+  }
+
+  const doc = new DOMParser().parseFromString(xmlStr, 'text/xml');
+  const tables = getW(doc.documentElement, 'tbl');
+
+  for(const tbl of tables){
+    const rows = getW(tbl, 'tr');
+    if(rows.length < 3) continue;
+
+    const allCells = rows.map(r => getW(r,'tc').map(cellText));
+    const header   = allCells[0];
+    if(header.length < 3) continue;
+
+    const normH = header.map(normaliseArea);
+
+    // ── Landscape format: headers include known subjects ──
+    const subjectCols = normH
+      .map((a,i) => ({a,i}))
+      .filter(({a}) => /^(Math|Language|UOI|Learner|Science|Specialist)$/.test(a));
+
+    if(subjectCols.length >= 2){
+      const studentCol = subjectCols[0].i > 0 ? subjectCols[0].i - 1 : 0;
+      // check if there is a level column between student and first subject
+      // (some tables have: Name | Level | Math | Language | ...)
+      const levelCol = (subjectCols[0].i - studentCol > 1) ? studentCol + 1 : -1;
+
+      const segments = [];
+      const roster   = new Set(manualRoster||[]);
+
+      for(let ri = 1; ri < allCells.length; ri++){
+        const cells = allCells[ri];
+        const rawName = (cells[studentCol]||'').trim();
+
+        // Skip rows that are pure level labels (some tables have a level sub-row)
+        if(/^(Emerging|Developing|Achieving|Extending|Secure)\s*$/i.test(rawName)) continue;
+        if(!isLikelyStudentName(rawName)) continue;
+
+        roster.add(rawName);
+
+        for(const {a: area, i} of subjectCols){
+          const comment = (cells[i]||'').replace(/\s+/g,' ').trim();
+          if(!comment || comment.length < 20) continue;
+          if(isGarbled(comment)) continue;
+
+          const tableLevel = levelCol >= 0 ? (cells[levelCol]||'').trim() : null;
+          const level = (tableLevel && /^(Emerging|Developing|Achieving|Extending|Secure)$/i.test(tableLevel))
+            ? tableLevel : extractLevel(comment);
+
+          segments.push({ studentName: rawName, reportArea: area, level, comment, sourceRef:`Row ${ri+1}`, confidence:'high' });
+        }
+      }
+
+      if(segments.length > 0) return { segments, roster };
+    }
+
+    // ── Portrait format: separate Student | Area | Level | Comment columns ──
+    const stuIdx  = header.findIndex(c => /^(student|name)\b/i.test(c));
+    const areaIdx = header.findIndex((c,i) => i !== stuIdx && /\b(area|subject|report)\b/i.test(c));
+    const lvlIdx  = header.findIndex(c => /^level\b/i.test(c));
+    const cmtIdx  = header.findIndex(c => /\b(comment|text)\b/i.test(c));
+
+    if(stuIdx >= 0 && cmtIdx >= 0){
+      const segments = [];
+      const roster   = new Set(manualRoster||[]);
+
+      for(let ri = 1; ri < allCells.length; ri++){
+        const cells = allCells[ri];
+        const rawName = (cells[stuIdx]||'').trim();
+        if(!isLikelyStudentName(rawName)) continue;
+        roster.add(rawName);
+
+        const rawArea   = areaIdx >= 0 ? cells[areaIdx] : '';
+        const area      = normaliseArea(rawArea) || 'General';
+        const rawLevel  = lvlIdx >= 0 ? (cells[lvlIdx]||'').trim() : null;
+        const level     = (rawLevel && /^(Emerging|Developing|Achieving|Extending|Secure)$/i.test(rawLevel))
+          ? rawLevel : null;
+        const comment   = (cells[cmtIdx]||'').replace(/\s+/g,' ').trim();
+
+        if(!comment || comment.length < 20) continue;
+        if(isGarbled(comment)) continue;
+
+        segments.push({ studentName: rawName, reportArea: area, level: level||extractLevel(comment), comment, sourceRef:`Row ${ri+1}`, confidence:'high' });
+      }
+
+      if(segments.length > 0) return { segments, roster };
+    }
+  }
+
+  // ── Fallback: mammoth HTML extraction ──
+  return await parseDocxFallback(file, manualRoster);
+}
+
+async function parseDocxFallback(file, manualRoster){
+  const ab = await file.arrayBuffer();
+  const result = await mammoth.convertToHtml({ arrayBuffer: ab });
+  const html = result.value;
+  return parseHtmlFallback(html, manualRoster);
+}
+
+function parseHtmlFallback(html, manualRoster){
+  const roster = new Set(manualRoster||[]);
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+
+  // Try to find tables in the HTML
+  const tables = Array.from(doc.querySelectorAll('table'));
+  for(const tbl of tables){
+    const rows = Array.from(tbl.querySelectorAll('tr'));
+    if(rows.length < 3) continue;
+    const header = Array.from(rows[0].querySelectorAll('td,th')).map(c=>c.textContent.trim());
+    const normH = header.map(normaliseArea);
+    const subjectCols = normH.map((a,i)=>({a,i})).filter(({a})=>/^(Math|Language|UOI|Learner|Science|Specialist)$/.test(a));
+
+    if(subjectCols.length >= 2){
+      const studentCol = subjectCols[0].i > 0 ? subjectCols[0].i - 1 : 0;
+      const segments = [];
+      for(let ri = 1; ri < rows.length; ri++){
+        const cells = Array.from(rows[ri].querySelectorAll('td,th')).map(c=>c.textContent.replace(/\s+/g,' ').trim());
+        const rawName = cells[studentCol]||'';
+        if(!isLikelyStudentName(rawName)) continue;
+        roster.add(rawName);
+        for(const {a:area, i} of subjectCols){
+          const comment = cells[i]||'';
+          if(!comment || comment.length < 20 || isGarbled(comment)) continue;
+          segments.push({ studentName:rawName, reportArea:area, level:extractLevel(comment), comment, sourceRef:`Row ${ri+1}`, confidence:'high' });
+        }
+      }
+      if(segments.length > 0) return { segments, roster };
+    }
+  }
+
+  // Last resort: try to parse as paragraphs
+  const segments = [];
+  const builtRoster = new Set(roster);
+  const LEVEL_RE = /\b(Emerging|Developing|Achieving|Extending|Secure)\b/;
+  let curStudent = null, curArea = null, buf = [];
+
+  function flush(){
+    const text = buf.join(' ').replace(/\s+/g,' ').trim(); buf = [];
+    if(!text || text.length < 20 || !curStudent) return;
+    if(isGarbled(text)) return;
+    const level = (text.match(LEVEL_RE)||[])[1]||null;
+    const area  = curArea || 'General';
+    segments.push({ studentName:curStudent, reportArea:area, level, comment:text, sourceRef:'—', confidence:'low' });
+  }
+
+  for(const el of Array.from(doc.body.children)){
+    const txt = el.textContent.trim();
+    if(!txt) continue;
+    const tag = el.tagName.toLowerCase();
+    if(['h1','h2','h3','h4'].includes(tag)){
+      if(isLikelyStudentName(txt)){ flush(); curStudent=txt; curArea=null; builtRoster.add(txt); }
+    } else {
+      const bold = el.querySelector('strong,b');
+      if(bold && bold.textContent.trim()===txt && isLikelyStudentName(txt)){
+        flush(); curStudent=txt; curArea=null; builtRoster.add(txt);
+      } else if(isKnownArea(txt)){ flush(); curArea=normaliseArea(txt); }
+      else { buf.push(txt); }
+    }
+  }
+  flush();
+  return { segments, roster:builtRoster };
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PDF PARSING  (PDF.js, position-based)
+═══════════════════════════════════════════════════════════ */
+
+async function readPdfItems(file){
   const buf = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({data:buf}).promise;
-  const allItems = [];
-  for(let p=1; p<=pdf.numPages; p++){
+  const items = [];
+  for(let p = 1; p <= pdf.numPages; p++){
     const page    = await pdf.getPage(p);
     const vp      = page.getViewport({scale:1});
     const content = await page.getTextContent();
     content.items.forEach(item=>{
       const t = item.str;
-      if(!t||!t.trim()) return;
-      allItems.push({
-        x:    item.transform[4],
-        y:    Math.round(vp.height - item.transform[5]),
-        text: t,
-        page: p,
-      });
+      if(!t || !t.trim()) return;
+      items.push({ x: item.transform[4], y: Math.round(vp.height - item.transform[5]), text: t.trim(), page: p });
     });
   }
-  return allItems;
+  return items;
 }
 
-function detectTableColumns(allItems){
-  const page1 = allItems.filter(i=>i.page===1);
-  const yGroups = [];
-  page1.forEach(item=>{
-    const existing = yGroups.find(g=>Math.abs(g.y - item.y)<=4);
-    if(existing) existing.items.push(item);
-    else         yGroups.push({y:item.y, items:[item]});
+function groupIntoRows(items, yTol=5){
+  const sorted = [...items].sort((a,b)=> a.page!==b.page ? a.page-b.page : a.y-b.y);
+  const rows = [];
+  let cur = null;
+  sorted.forEach(item=>{
+    if(!cur || item.page!==cur.page || Math.abs(item.y-cur.y)>yTol){
+      if(cur) rows.push(cur);
+      cur = { y:item.y, page:item.page, items:[item] };
+    } else {
+      cur.items.push(item);
+    }
   });
-  yGroups.forEach(g=>g.items.sort((a,b)=>a.x-b.x));
-
-  let headerGroup = null;
-  for(const g of yGroups){
-    const hits = g.items.filter(i=>KNOWN_SUBJECTS.has(i.text.trim()));
-    if(hits.length >= 2){ headerGroup = g; break; }
-  }
-  if(!headerGroup || headerGroup.items.length < 3) return null;
-
-  const hdrItems = headerGroup.items;
-  const boundaries = [0];
-  for(let i=1; i<hdrItems.length; i++){
-    boundaries.push((hdrItems[i-1].x + hdrItems[i].x) / 2);
-  }
-  const subjects = hdrItems.map(h=>normaliseSubject(h.text.trim()));
-  return { boundaries, subjects };
+  if(cur) rows.push(cur);
+  rows.forEach(r => r.items.sort((a,b)=>a.x-b.x));
+  return rows;
 }
 
-function assignCol(x, boundaries){
-  let c = 0;
-  for(let i=1; i<boundaries.length; i++){
-    if(x >= boundaries[i]) c=i;
+function detectPdfColumns(rows){
+  // Find row with 2+ known subject headings
+  for(const row of rows){
+    const texts = row.items.map(i=>i.text.trim());
+    const hits  = texts.filter(t => /^(Math|Maths|Mathematics|Language|English|UOI|Unit\s+of|Learner|Science|Specialist|Learning)$/i.test(t));
+    if(hits.length >= 2){
+      const xs = row.items.map(i=>i.x).sort((a,b)=>a-b);
+      const boundaries = [0];
+      for(let i=1; i<xs.length; i++) boundaries.push((xs[i-1]+xs[i])/2);
+      const subjects = row.items.map(i=>normaliseArea(i.text));
+      return { boundaries, subjects };
+    }
   }
+  return null;
+}
+
+function assignColumn(x, boundaries){
+  let c = 0;
+  for(let i=1; i<boundaries.length; i++) if(x >= boundaries[i]) c = i;
   return c;
 }
 
-function mergeColItems(items){
-  const sorted = [...items].sort((a,b)=>
-    a.page!==b.page ? a.page-b.page : a.y!==b.y ? a.y-b.y : a.x-b.x);
-  const lines = [];
-  let cur = null;
-  sorted.forEach(item=>{
-    if(!cur || item.page!==cur.page || Math.abs(item.y-cur.y)>5){
-      if(cur) lines.push(cur);
-      cur = {y:item.y, page:item.page, text:item.text};
-    } else {
-      cur.text += (cur.text.endsWith(' ')||item.text.startsWith(' ') ? '' : ' ') + item.text;
-    }
-  });
-  if(cur) lines.push(cur);
-  return lines;
-}
+async function parsePdfRows(file, manualRoster){
+  const items   = await readPdfItems(file);
+  const rows    = groupIntoRows(items);
+  const colInfo = detectPdfColumns(rows);
 
-function extractPdfTableSegments(allItems, colInfo, manualRoster){
+  if(!colInfo || colInfo.subjects.length < 3){
+    // No clear table structure — ask for .docx
+    return { segments: [], roster: new Set(manualRoster||[]), noTable: true };
+  }
+
   const { boundaries, subjects } = colInfo;
-  const numSubjCols = subjects.length - 1;
 
-  const col0Raw  = [];
-  const subjRaw  = Array.from({length:numSubjCols}, ()=>[]);
-
-  allItems.forEach(item=>{
-    const c = assignCol(item.x, boundaries);
-    if(c === 0)               col0Raw.push(item);
-    else if(c <= numSubjCols) subjRaw[c-1].push(item);
+  // Assign each PDF text item to its column
+  const colBuckets = subjects.map(()=>[]);
+  items.forEach(item=>{
+    const c = assignColumn(item.x, boundaries);
+    if(c < colBuckets.length) colBuckets[c].push(item);
   });
 
-  const col0Lines = mergeColItems(col0Raw);
-  const subjLines = subjRaw.map(mergeColItems);
+  // Merge col0 items into lines
+  function mergeItems(bucket){
+    const sorted = [...bucket].sort((a,b)=> a.page!==b.page ? a.page-b.page : a.y!==b.y ? a.y-b.y : a.x-b.x);
+    const lines = [];
+    let cur = null;
+    sorted.forEach(item=>{
+      if(!cur || item.page!==cur.page || Math.abs(item.y-cur.y)>5){
+        if(cur) lines.push(cur);
+        cur = { y:item.y, page:item.page, text:item.text };
+      } else {
+        cur.text += (cur.text.endsWith(' ')||item.text.startsWith(' ') ? '' : ' ') + item.text;
+      }
+    });
+    if(cur) lines.push(cur);
+    return lines;
+  }
 
+  const nameLines    = mergeItems(colBuckets[0]);
+  const subjectLines = colBuckets.slice(1).map(mergeItems);
+
+  // Build student list from col0 — only proper names
   const roster = new Set(manualRoster||[]);
-  const LEVEL_RE = /^level$/i;
-  const SKIP_RE  = /^(student|name)$/i;
-
   const studentEntries = [];
-  const levelEntries   = [];
 
-  col0Lines.forEach(line=>{
+  nameLines.forEach(line=>{
     const t = line.text.trim();
-    if(!t || SKIP_RE.test(t)) return;
-    if(LEVEL_RE.test(t)){
-      levelEntries.push({page:line.page, y:line.y});
-    } else if(isLikelyStudentName(t)){
-      studentEntries.push({name:t, page:line.page, y:line.y});
+    if(/^(Student|Name|Level|Emerging|Developing|Achieving|Extending|Secure)$/i.test(t)) return;
+    if(isLikelyStudentName(t)){
+      studentEntries.push({ name:t, y:line.y, page:line.page });
       roster.add(t);
     }
   });
 
+  if(studentEntries.length < 2){
+    return { segments:[], roster, noTable: true };
+  }
+
+  // Build segments
   const segments = [];
 
-  for(let si=0; si<studentEntries.length; si++){
+  for(let si = 0; si < studentEntries.length; si++){
     const stu     = studentEntries[si];
     const nextStu = studentEntries[si+1];
 
-    const levelEntry = levelEntries.find(lev=>{
-      if(lev.page < stu.page) return false;
-      if(lev.page === stu.page && lev.y <= stu.y) return false;
-      if(nextStu){
-        if(lev.page > nextStu.page) return false;
-        if(lev.page === nextStu.page && lev.y >= nextStu.y) return false;
-      }
-      return true;
-    });
-
-    for(let ci=0; ci<numSubjCols; ci++){
-      const commentLines = subjLines[ci].filter(line=>{
+    for(let ci = 0; ci < subjectLines.length; ci++){
+      const area = subjects[ci+1] || 'General';
+      const commentLines = subjectLines[ci].filter(line=>{
         if(line.page < stu.page) return false;
         if(line.page === stu.page && line.y < stu.y - 3) return false;
         if(nextStu){
           if(line.page > nextStu.page) return false;
           if(line.page === nextStu.page && line.y >= nextStu.y - 3) return false;
         }
-        if(levelEntry && line.page===levelEntry.page && Math.abs(line.y-levelEntry.y)<=6) return false;
         return true;
       });
 
-      const text = commentLines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
-      if(!text || text.length<20) continue;
+      const comment = commentLines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
+      if(!comment || comment.length < 20) continue;
+      if(isGarbled(comment)) continue;
 
-      let level = null;
-      if(levelEntry){
-        const lvlItem = subjRaw[ci].find(item=>
-          item.page===levelEntry.page && Math.abs(item.y-levelEntry.y)<=6
-        );
-        if(lvlItem) level = lvlItem.text.trim();
-      }
-
-      const area = subjects[ci+1] || 'General';
-      segments.push({student:stu.name, area, text, level});
+      const level = extractLevel(comment);
+      segments.push({ studentName:stu.name, reportArea:area, level, comment, sourceRef:`Page ${stu.page}`, confidence:'high' });
     }
   }
 
   return { segments, roster };
 }
 
-function reconstructLinearText(allItems){
-  const lineMap = new Map();
-  allItems.forEach(item=>{
-    const key = `${item.page}-${item.y}`;
-    if(!lineMap.has(key)) lineMap.set(key,{page:item.page,y:item.y,parts:[]});
-    lineMap.get(key).parts.push(item);
-  });
-  return [...lineMap.values()]
-    .sort((a,b)=>a.page!==b.page?a.page-b.page:a.y-b.y)
-    .map(l=>l.parts.sort((a,b)=>a.x-b.x).map(p=>p.text).join(' ').trim())
-    .filter(l=>l.length>0)
-    .join('\n');
-}
-
-function checkPdfQuality(text){
-  if(!text||text.trim().length<60) return 'empty';
-  const lines = text.split('\n').filter(l=>l.trim().length>5);
-  if(lines.length<3) return 'too_short';
-  const real = lines.filter(l=>{
-    const ws = l.trim().split(/\s+/);
-    if(ws.length<3) return false;
-    const avg = ws.reduce((s,w)=>s+w.replace(/[^a-z]/gi,'').length,0)/ws.length;
-    return avg<=13 && !/[A-Z]{6,}/.test(l);
-  });
-  return real.length/lines.length < 0.25 ? 'garbled' : 'ok';
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   DOCX READING
-═══════════════════════════════════════════════════════════════ */
-async function readDocxHtml(file){
-  return new Promise((res,rej)=>{
-    const r = new FileReader();
-    r.onload = e => mammoth.convertToHtml({arrayBuffer:e.target.result}).then(v=>res(v.value)).catch(rej);
-    r.onerror = rej;
-    r.readAsArrayBuffer(file);
-  });
-}
-
-function looksLikeName(t, roster){
-  t = t.trim();
-  if(t.length<2||t.length>45) return null;
-  if(/[.!?,;:–—()\[\]{}]/.test(t)) return null;
-  if(/\b(is|are|was|has|have|can|will|does|did|the|and|but|for|in|on|at|to|of|a|an|with|from|that|this|his|her|their|which|who)\b/i.test(t)) return null;
-  if(roster && roster.size>0){
-    for(const name of roster){
-      const first = name.split(/\s+/)[0];
-      if(name.toLowerCase()===t.toLowerCase()) return name;
-      if(first.length>=3 && first.toLowerCase()===t.toLowerCase()) return name;
-    }
-  }
-  if(/^[A-Z][a-z]{1,20}(\s[A-Z][a-z]{1,20})?$/.test(t)){
-    const first = t.split(' ')[0];
-    if(!NOT_NAMES.has(first) && first.length>=3) return t;
-  }
-  if(/^[A-Z][a-zA-Z]{0,10}-[A-Z][a-zA-Z]{1,15}$/.test(t)) return t;
-  return null;
-}
-
-function looksLikeAreaHeading(t){
-  t = t.trim();
-  if(t.length<2||t.length>60) return null;
-  if(t.split(/\s+/).length>7) return null;
-  const n = normaliseSubject(t);
-  if(n !== t) return n;
-  return null;
-}
-
-function parseHtml(html, manualRoster){
-  const roster = new Set(manualRoster||[]);
-  const parser = new DOMParser();
-  const doc    = parser.parseFromString(html,'text/html');
-  const elems  = Array.from(doc.body.children);
-  const builtRoster = new Set(roster);
-
-  elems.forEach(el=>{
-    const tag = el.tagName.toLowerCase();
-    const txt = el.textContent.trim();
-    if(['h1','h2','h3','h4'].includes(tag)){
-      const n = looksLikeName(txt, roster);
-      if(n) builtRoster.add(n);
-    } else if(tag==='p'){
-      const bolds   = el.querySelectorAll('strong, b');
-      const boldTxt = Array.from(bolds).map(b=>b.textContent).join('').trim();
-      if(boldTxt===txt && txt.length<50){
-        const n = looksLikeName(txt, roster);
-        if(n) builtRoster.add(n);
-      }
-    }
-  });
-
-  const LEVEL_RE2 = /\b(Emerging|Developing|Achieving|Extending|Beginning|Approaching|Meeting|Exceeding|Secure)\b/;
-  const segments = [];
-  let curStudent=null, curArea=null, buf=[];
-
-  function flush(){
-    const text=buf.join('\n').trim(); buf=[];
-    if(!text||text.length<15||!curStudent) return;
-    const level=(text.match(LEVEL_RE2)||[])[1]||null;
-    const area = curArea || detectAreaFromText(text);
-    segments.push({student:curStudent, area, text, level});
-  }
-
-  elems.forEach(el=>{
-    const tag=el.tagName.toLowerCase();
-    const txt=el.textContent.trim();
-    if(!txt) return;
-    const isHeading  = ['h1','h2','h3','h4'].includes(tag);
-    const isBoldOnly = tag==='p' && (()=>{
-      const bolds   = el.querySelectorAll('strong, b');
-      const boldTxt = Array.from(bolds).map(b=>b.textContent).join('').trim();
-      return boldTxt===txt && txt.length<50;
-    })();
-    if(isHeading||isBoldOnly){
-      const name = looksLikeName(txt, builtRoster);
-      const area = name ? null : looksLikeAreaHeading(txt);
-      if(name){   flush(); curStudent=name; curArea=null; return; }
-      if(area){   flush(); curArea=area;    return; }
-    }
-    buf.push(txt);
-  });
-  flush();
-  return { segments, roster:builtRoster };
-}
-
-function parsePlainText(fullText, manualRoster){
-  const roster = new Set(manualRoster||[]);
-  const lines  = fullText.split('\n');
-  const builtRoster = new Set(roster);
-  lines.forEach(line=>{ const n=looksLikeName(line.trim(),roster); if(n) builtRoster.add(n); });
-
-  const LEVEL_RE2 = /\b(Emerging|Developing|Achieving|Extending|Beginning|Approaching|Meeting|Exceeding|Secure)\b/;
-  const segments = [];
-  let curStudent=null, curArea=null, buf=[];
-
-  function flush(){
-    const text=buf.join('\n').trim(); buf=[];
-    if(!text||text.length<15||!curStudent) return;
-    const level=(text.match(LEVEL_RE2)||[])[1]||null;
-    const area = curArea||detectAreaFromText(text);
-    segments.push({student:curStudent, area, text, level});
-  }
-
-  for(const line of lines){
-    const t=line.trim(); if(!t) continue;
-    const name=looksLikeName(t,builtRoster);
-    const area=name?null:looksLikeAreaHeading(t);
-    if(name){    flush(); curStudent=name; curArea=null; }
-    else if(area){ flush(); curArea=area; }
-    else { buf.push(t); }
-  }
-  flush();
-  return { segments, roster:builtRoster };
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   SPELLING STYLE
-═══════════════════════════════════════════════════════════════ */
-function detectSpelling(fullText, pref){
-  if(pref==='uk') return 'uk';
-  if(pref==='us') return 'us';
-  let uk=0,us=0;
-  for(const p of UK_US){
-    us += (fullText.match(p.us)||[]).length;
-    uk += (fullText.match(p.uk)||[]).length;
-  }
-  if(uk===0&&us===0) return 'either';
-  if(us>uk*2) return 'us';
-  if(uk>us*2) return 'uk';
-  return 'mixed';
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   SENTENCE UTILITIES
-═══════════════════════════════════════════════════════════════ */
-function splitSentences(text){
-  const parts = text.match(/[^.!?]+(?:[.!?]+(?=\s+[A-Z]|\s*$)|[.!?]+)/g)||[text];
-  return parts.map(s=>s.trim()).filter(s=>s.length>8 && wc(s)>=4);
-}
-
-function isUsableSentence(s){
-  if(!s||wc(s)<4) return false;
-  if(/[A-Z]{5,}/.test(s)) return false;
-  if(/\w{18,}/.test(s))   return false;
-  const ws  = s.split(/\s+/);
-  const avg = ws.reduce((x,w)=>x+w.replace(/[^a-zA-Z]/g,'').length,0)/ws.length;
-  return avg>=2 && avg<=12;
-}
-
-/* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
    CHECKS
-═══════════════════════════════════════════════════════════════ */
+═══════════════════════════════════════════════════════════ */
 
-/* ─── A. WRONG NAME ─────────────────────────────────────────── */
+/* A. Wrong name ──────────────────────────────────────────── */
 function checkWrongName(seg, roster){
-  const { student, area, text } = seg;
-  const firstName = student.split(/[\s\-]+/)[0];
+  const { studentName, reportArea, comment } = seg;
+  const firstName = studentName.split(/[\s\-]+/)[0];
   const issues    = [];
 
   for(const other of roster){
-    if(issues.length >= 3) break; // safety cap: max 3 wrong-name issues per segment
-    if(other===student) continue;
+    if(issues.length >= 2) break;
+    if(other === studentName) continue;
     const otherFirst = other.split(/[\s\-]+/)[0];
-    const otherFirstCap = otherFirst.charAt(0).toUpperCase()+otherFirst.slice(1);
-    if(otherFirst.length<3 || NOT_NAMES.has(otherFirst) || NOT_NAMES.has(otherFirstCap)) continue;
+    const otherFirstCap = cap(otherFirst);
+    // Only check real roster names — must be in roster and not a keyword
+    if(otherFirst.length < 3) continue;
+    if(NOT_NAMES.has(otherFirst) || NOT_NAMES.has(otherFirstCap)) continue;
 
     const re = new RegExp(`\\b${escRe(otherFirst)}\\b`,'g');
-    const sents = splitSentences(text);
-    for(const sent of sents){
+    for(const sent of splitSentences(comment)){
       if(!isUsableSentence(sent)) continue;
-      const mAll = [...sent.matchAll(re)];
-      if(!mAll.length) continue;
-      const ownRe = new RegExp(`\\b${escRe(firstName)}\\b`,'i');
-      if(ownRe.test(sent)) continue;
-      const firstSent = sents[0];
-      if(sent === firstSent){
-        const firstWord = sent.trim().split(/\s+/)[0].replace(/[^a-zA-Z]/g,'');
-        if(firstWord.toLowerCase() === firstName.toLowerCase()) continue;
-      }
-      const correctedSent = sent.replace(re, firstName);
+      if(!re.test(sent)) continue;
+      re.lastIndex = 0;
+      // If the student's own name is also in the sentence, skip (might be a comparison)
+      if(new RegExp(`\\b${escRe(firstName)}\\b`,'i').test(sent)) continue;
+      const corrected = sent.replace(new RegExp(`\\b${escRe(otherFirst)}\\b`,'g'), firstName);
       issues.push({
         section:'names', type:'Wrong name',
-        student:`${student} - ${area}`,
-        exactSent: sent,
-        issue:`"${otherFirst}" appears in ${firstName}'s ${area} comment — possible copy-paste error from another student's report.`,
-        fix:`If so, change to: "${correctedSent}"`,
+        studentArea:`${studentName} — ${reportArea}`,
+        whatToCheck: sent,
+        suggestedFix:`Check if this should say "${firstName}" instead of "${otherFirst}": "${corrected}"`,
       });
       break;
     }
@@ -517,941 +548,991 @@ function checkWrongName(seg, roster){
   return issues;
 }
 
-/* ─── B. PRONOUN INCONSISTENCY ──────────────────────────────── */
+/* B. Pronoun inconsistency ───────────────────────────────── */
 function checkPronouns(seg){
-  const { student, area, text } = seg;
-  const sents    = splitSentences(text).filter(isUsableSentence);
-  const heSents  = sents.filter(s=>/\b(he|him|his)\b/i.test(s));
-  const sheSents = sents.filter(s=>/\b(she|her|hers)\b/i.test(s));
-
-  if(heSents.length>0 && sheSents.length>0){
+  const { studentName, reportArea, comment } = seg;
+  const sents   = splitSentences(comment).filter(isUsableSentence);
+  const heSents = sents.filter(s=>/\b(he|him|his)\b/i.test(s));
+  const sheSents= sents.filter(s=>/\b(she|her|hers)\b/i.test(s));
+  if(heSents.length > 0 && sheSents.length > 0){
     return [{
       section:'names', type:'Pronoun inconsistency',
-      student:`${student} - ${area}`,
-      exactSent:`"${heSents[0].trim()}" / "${sheSents[0].trim()}"`,
-      issue:`This ${area} comment uses both he/him/his and she/her pronouns.`,
-      fix:`Choose one set of pronouns and use it consistently throughout the ${area} comment.`,
+      studentArea:`${studentName} — ${reportArea}`,
+      whatToCheck:`"${heSents[0].trim()}" / "${sheSents[0].trim()}"`,
+      suggestedFix:`Choose one pronoun set (he/him/his or she/her) and use it consistently throughout the ${reportArea} comment.`,
     }];
   }
   return [];
 }
 
-/* ─── C. LEVEL LABEL ("an achieving student") ──────────────── */
-const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+(student|learner|child|language\s+student)\b/gi;
-
-function checkLevelLabel(seg){
-  const { student, area, text } = seg;
+/* C. Spelling typos ──────────────────────────────────────── */
+function checkTypos(seg){
+  const { studentName, reportArea, comment } = seg;
   const issues = [];
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-    const re = new RegExp(LEVEL_LABEL_RE.source,'gi');
-    const m  = re.exec(sent);
-    if(m){
+  const seen   = new Set();
+  for(const [wrong, right] of TYPOS){
+    const re = new RegExp(`\\b${escRe(wrong)}\\b`,'gi');
+    const m  = re.exec(comment);
+    if(m && !seen.has(wrong)){
+      seen.add(wrong);
       issues.push({
-        section:'biggest', type:'Level label as description',
-        student:`${student} - ${area}`,
-        exactSent: sent,
-        issue:`"${m[0].trim()}" — do not use the student's level as a description.`,
-        fix:`Describe what the student does instead — e.g. "demonstrates strong ability in..." or name the specific skill or behaviour.`,
+        section:'spelling', type:'Spelling error',
+        studentArea:`${studentName} — ${reportArea}`,
+        whatToCheck:`"${m[0]}"`,
+        suggestedFix:`Change to "${right}"`,
       });
     }
   }
   return issues;
 }
 
-/* ─── D. SPELLING TYPOS ─────────────────────────────────────── */
-function checkTypos(seg){
-  const { student, area, text } = seg;
+/* D. UK/US consistency (whole document) ──────────────────── */
+function checkSpellingConsistency(allComments, pref){
   const issues = [];
-  const seen   = new Set();
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-    for(const [wrong, right] of TYPOS){
-      if(seen.has(wrong)) continue;
-      const re = new RegExp(`\\b${escRe(wrong)}\\b`,'i');
-      const m  = sent.match(re);
-      if(m){
-        seen.add(wrong);
-        const corrected = sent.replace(re, right);
-        issues.push({
-          section:'spelling', type:'Spelling error',
-          student:`${student} - ${area}`,
-          exactSent: sent,
-          issue:`"${m[0]}" — should be "${right}".`,
-          fix:`"${corrected}"`,
-        });
+  const fullText = allComments.join(' ');
+
+  let ukCount = 0, usCount = 0;
+  UK_US_PAIRS.forEach(p=>{
+    ukCount += (fullText.match(p.uk)||[]).length;
+    usCount += (fullText.match(p.us)||[]).length;
+  });
+
+  let domStyle = 'either';
+  if(pref === 'uk') domStyle = 'uk';
+  else if(pref === 'us') domStyle = 'us';
+  else if(ukCount > 0 && usCount > 0) domStyle = 'mixed';
+  else if(ukCount > 0) domStyle = 'uk';
+  else if(usCount > 0) domStyle = 'us';
+
+  if(domStyle === 'mixed'){
+    const ukExamples = [], usExamples = [];
+    UK_US_PAIRS.forEach(p=>{
+      const ukM = fullText.match(p.uk);
+      const usM = fullText.match(p.us);
+      if(ukM && usM){
+        if(!ukExamples.find(e=>e.word===p.ukW)) ukExamples.push({word:p.ukW, count:ukM.length});
+        if(!usExamples.find(e=>e.word===p.usW)) usExamples.push({word:p.usW, count:usM.length});
       }
+    });
+    if(ukExamples.length > 0 || usExamples.length > 0){
+      const ukList = ukExamples.slice(0,3).map(e=>`"${e.word}"`).join(', ');
+      const usList = usExamples.slice(0,3).map(e=>`"${e.word}"`).join(', ');
+      issues.push({
+        section:'spelling', type:'UK/US spelling mix',
+        studentArea:'Whole document',
+        whatToCheck:`Both UK (${ukList}) and US (${usList}) spellings appear.`,
+        suggestedFix:'Choose one spelling style and apply it consistently across all comments.',
+      });
     }
+  } else if(domStyle === 'uk' && pref === 'us'){
+    issues.push({
+      section:'spelling', type:'Spelling style',
+      studentArea:'Whole document',
+      whatToCheck:'Document uses UK spelling (e.g. "organise", "behaviour").',
+      suggestedFix:'Change to US spelling throughout if US English is preferred.',
+    });
+  } else if(domStyle === 'us' && pref === 'uk'){
+    issues.push({
+      section:'spelling', type:'Spelling style',
+      studentArea:'Whole document',
+      whatToCheck:'Document uses US spelling (e.g. "organize", "behavior").',
+      suggestedFix:'Change to UK spelling throughout if UK English is preferred.',
+    });
   }
+
   return issues;
 }
 
-/* ─── E. UK/US CONSISTENCY ──────────────────────────────────── */
-function checkSpellingConsistency(fullText, domStyle, allSegments){
-  if(domStyle==='either') return [];
-  const issues = [];
-  const seen   = new Set();
-
-  for(const seg of allSegments){
-    for(const sent of splitSentences(seg.text)){
-      if(!isUsableSentence(sent)) continue;
-      for(const pair of UK_US){
-        const key = pair.usW+'/'+pair.ukW;
-        if(seen.has(key)) continue;
-        let m, concern, rec;
-
-        if(domStyle==='uk'||domStyle==='mixed'){
-          m = sent.match(pair.us);
-          if(m){
-            concern = domStyle==='mixed'
-              ? `Both "${pair.ukW}" and "${pair.usW}" appear in the document.`
-              : `"${m[0]}" (US spelling) — document mostly uses UK spelling.`;
-            rec = `Use "${pair.ukW}" consistently throughout.`;
-            seen.add(key);
-          }
-        } else {
-          m = sent.match(pair.uk);
-          if(m){
-            concern = `"${m[0]}" (UK spelling) — document mostly uses US spelling.`;
-            rec = `Use "${pair.usW}" consistently throughout.`;
-            seen.add(key);
-          }
-        }
-        if(m) issues.push({
-          section:'spelling', type:'Spelling consistency',
-          student:'Whole document',
-          issue: concern,
-          fix: rec,
-        });
-      }
-    }
-  }
-  return issues;
-}
-
-/* ─── F. GRAMMAR ─────────────────────────────────────────────── */
-const AAN_TO_AN = [
-  /\ba\s+(understanding)\b/i, /\ba\s+(inquiry)\b/i,
-  /\ba\s+(excellent)\b/i,     /\ba\s+(important)\b/i,
-  /\ba\s+(interesting)\b/i,   /\ba\s+(effective)\b/i,
-  /\ba\s+(engaging)\b/i,      /\ba\s+(authentic)\b/i,
-  /\ba\s+(accurate)\b/i,      /\ba\s+(IB)\b/i,
-  /\ba\s+(honest)\b/i,        /\ba\s+(enthusiastic)\b/i,
-  /\ba\s+(exceptional)\b/i,   /\ba\s+(impressive)\b/i,
-  /\ba\s+(outstanding)\b/i,   /\ba\s+(organised)\b/i,
-  /\ba\s+(organized)\b/i,     /\ba\s+(open[- ]minded)\b/i,
-  /\ba\s+(increasing)\b/i,    /\ba\s+(enjoyable)\b/i,
-  /\ba\s+(encouraging)\b/i,
-];
-const AAN_TO_A = [
-  /\ban\s+(strong)\b/i,    /\ban\s+(great)\b/i,
-  /\ban\s+(good)\b/i,      /\ban\s+(significant)\b/i,
-  /\ban\s+(steady)\b/i,    /\ban\s+(successful)\b/i,
-  /\ban\s+(key)\b/i,       /\ban\s+(growing)\b/i,
-  /\ban\s+(positive)\b/i,  /\ban\s+(creative)\b/i,
-  /\ban\s+(curious)\b/i,   /\ban\s+(confident)\b/i,
-  /\ban\s+(dedicated)\b/i, /\ban\s+(motivated)\b/i,
-  /\ban\s+(talented)\b/i,
-];
-const MISSING_A_PATTERNS = [
-  { re:/\b(is|was|remains?|became?)\s+(very|highly|quite|remarkably|incredibly|extremely)\s+(independent|keen|motivated|dedicated|focused|resilient|enthusiastic|thoughtful|engaged)\s+(learner|thinker|communicator|reader|writer|contributor|member)\b/i,
-    fn:(sent,m)=>sent.replace(m[0],`${m[1]} a ${m[2]} ${m[3]} ${m[4]}`) },
-];
-const HYPHEN_PATTERNS = [
-  { re:/\b(two|three|four|five|six|seven|eight)\s+(paragraph)\s+(persuasive|informative|narrative|recount|argument|essay|letter|text|piece)\b/i,
-    fn:(sent,m)=>sent.replace(m[0],`${m[1]}-${m[2]} ${m[3]}`) },
-  { re:/\bself\s+(management|directed|motivated|paced|regulation|regulated|confidence|sufficient)\b/i,
-    fn:(sent,m)=>sent.replace(m[0],`self-${m[1]}`) },
-  { re:/\bwell\s+(written|structured|organised|organized|developed|supported|presented|researched|rounded)\b(?=\s+\w)/i,
-    fn:(sent,m)=>sent.replace(m[0],`well-${m[1]}`) },
+/* E. Grammar and punctuation ─────────────────────────────── */
+const GRAMMAR_CHECKS = [
+  // Missing space after full stop
+  { re:/([a-z]\.)([A-Z])/g, fix:(m,a,b)=>`${a} ${b}`, type:'Missing space after full stop', desc:(m)=>`"${m[0]}" — missing space` },
+  // Extra punctuation
+  { re:/([.!?,])\s*\1+/g, fix:(m,a)=>a, type:'Duplicate punctuation', desc:(m)=>`"${m[0]}" — duplicate punctuation mark` },
+  // Extra space before punctuation
+  { re:/\s+([.,;:!?])/g, fix:(m,a)=>a, type:'Space before punctuation', desc:(m)=>`"${m[0]}" — extra space before punctuation` },
+  // Double space
+  { re:/([^\s])\s{2,}([^\s])/g, fix:(m,a,b)=>`${a} ${b}`, type:'Extra space', desc:(m)=>`double space in text` },
+  // Duplicate words
+  { re:/\b(and|the|is|a|an|to|of|in|for|on|at|with|that|this|or|but|as|if|by|from|up)\s+\1\b/gi,
+    fix:(m,a)=>a, type:'Duplicate word', desc:(m)=>`"${m[0]}" — repeated word` },
+  // Missing article (basic)
+  { re:/\bWhile (he|she|they) is (highly )?(independent|confident|capable|creative|curious)\s+learner\b/gi,
+    fix:(m,p,q,adj)=>`While ${p} is ${q||''}a${adj.match(/^[aeiou]/i)?'n':''} ${adj} learner`,
+    type:'Missing article', desc:(m)=>`"${m[0]}" — missing article "a/an"` },
 ];
 
 function checkGrammar(seg){
-  const { student, area, text } = seg;
+  const { studentName, reportArea, comment } = seg;
   const issues = [];
+  const seen = new Set();
 
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-
-    for(const re of AAN_TO_AN){
-      const m = sent.match(re);
-      if(m){
-        const word      = m[1];
-        const corrected = sent.replace(re,`an ${word}`);
-        if(/\ban\s+a[n]?\b/i.test(corrected)) continue;
-        issues.push({section:'grammar',type:'Grammar (a/an)',student:`${student} - ${area}`,
-          exactSent:sent,issue:`"a ${word}" — needs "an" before a vowel sound.`,fix:`"${corrected}"`});
-        break;
-      }
-    }
-    for(const re of AAN_TO_A){
-      const m = sent.match(re);
-      if(m){
-        const word      = m[1];
-        const corrected = sent.replace(re,`a ${word}`);
-        issues.push({section:'grammar',type:'Grammar (a/an)',student:`${student} - ${area}`,
-          exactSent:sent,issue:`"an ${word}" — "${word}" starts with a consonant sound; use "a".`,fix:`"${corrected}"`});
-        break;
-      }
-    }
-    for(const {re,fn} of MISSING_A_PATTERNS){
-      const m = sent.match(re);
-      if(m){
-        const corrected = fn(sent,m);
-        if(corrected&&corrected!==sent){
-          issues.push({section:'grammar',type:'Missing word',student:`${student} - ${area}`,
-            exactSent:sent,issue:`"${m[0]}" — missing the article "a".`,fix:`"${corrected}"`});
-          break;
-        }
-      }
-    }
-    for(const {re,fn} of HYPHEN_PATTERNS){
-      const m = sent.match(re);
-      if(m){
-        const corrected = fn(sent,m);
-        if(corrected&&corrected!==sent){
-          issues.push({section:'grammar',type:'Hyphenation',student:`${student} - ${area}`,
-            exactSent:sent,issue:`"${m[0]}" — compound adjective needs a hyphen.`,fix:`"${corrected}"`});
-          break;
-        }
+  for(const check of GRAMMAR_CHECKS){
+    check.re.lastIndex = 0;
+    for(const sent of splitSentences(comment)){
+      if(!isUsableSentence(sent)) continue;
+      check.re.lastIndex = 0;
+      const m = check.re.exec(sent);
+      if(m && !seen.has(check.type + m[0])){
+        seen.add(check.type + m[0]);
+        const fixed = typeof check.fix === 'function' ? sent.replace(new RegExp(check.re.source, check.re.flags), check.fix) : sent;
+        issues.push({
+          section: check.type === 'Duplicate word' ? 'duplication' : 'grammar',
+          type: check.type,
+          studentArea:`${studentName} — ${reportArea}`,
+          whatToCheck: check.desc(m),
+          suggestedFix: check.type === 'Duplicate word' ? `Remove one "${m[1]}"` : `"${fixed.trim()}"`,
+        });
       }
     }
   }
+
+  // Hyphenation checks
+  const HYPHEN_RE = /\b(four|five|six|seven|eight|nine|ten|three|two)\s+(paragraph|page|sentence|week|day|year|hour|minute|word|part)\s+(persuasive|essay|letter|story|report|plan)\b/gi;
+  HYPHEN_RE.lastIndex = 0;
+  const hm = HYPHEN_RE.exec(comment);
+  if(hm && !seen.has('hyphen'+hm[0])){
+    seen.add('hyphen'+hm[0]);
+    const fixed = hm[0].replace(/\s+/g,'-');
+    issues.push({
+      section:'grammar', type:'Hyphenation',
+      studentArea:`${studentName} — ${reportArea}`,
+      whatToCheck:`"${hm[0]}" — compound adjective should be hyphenated`,
+      suggestedFix:`"${fixed}"`,
+    });
+  }
+
   return issues;
 }
 
-/* ─── G. PUNCTUATION / SPACING ──────────────────────────────── */
-function checkPunctuation(seg){
-  const { student, area, text } = seg;
-  const issues = [];
-
-  const spaceRe = /([a-z]{3,})\.(Additionally|Furthermore|However|Throughout|This|The|In|During|As|By|After|Before|He|She|They|It|His|Her|Their|One|Another|Over|Both|While|Since|Although|When|Through)/g;
-  const spaceMatches = [];
-  let sm;
-  while((sm=spaceRe.exec(text))!==null){ spaceMatches.push(sm); if(spaceMatches.length>=2) break; }
-  for(const sm of spaceMatches){
-    issues.push({section:'grammar',type:'Missing space',student:`${student} - ${area}`,
-      exactSent:`"…${sm[0]}…"`,
-      issue:`Missing space after full stop: "${sm[0]}"`,
-      fix:`Change "${sm[0]}" to "${sm[1]}. ${sm[2]}"`});
-  }
-
-  const dotRe = /([a-z]{2,})\.\s+\.|([a-z]{2,})\.\./g;
-  const dm    = dotRe.exec(text);
-  if(dm){
-    issues.push({section:'grammar',type:'Punctuation',student:`${student} - ${area}`,
-      exactSent:`"${dm[0]}"`,issue:`Extra full stop: "${dm[0]}"`,fix:`Remove the extra full stop.`});
-  }
-  return issues;
-}
-
-/* ─── H. FIRST-PERSON WORDING ──────────────────────────────── */
-// Matches "our" followed by 0-3 optional words then a unit-type keyword.
-// Also matches "our [unit-keyword]" directly (no words before keyword).
-// Examples caught: "our Units of Inquiry", "our inquiry into forces",
-//   "our Statistics inquiry", "our learning community", "our recent units"
-const OUR_RE = /\bour\s+((?:(?!units?\s+of\s+inquiry)[\w]+\s+){0,3}(?:units?\s+of\s+inquiry|units?|inquiry|inquiries|study|project|exploration|learning\s+community|Statistics\s+(?:and\s+Probability\s+)?(?:inquiry|unit)|advertising\s+unit))\b/gi;
-
-function checkFirstPerson(seg){
-  const { student, area, text } = seg;
-  const issues = [];
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-
-    const weRe = /\bAs\s+we\s+(moved?\s+into|explored?|looked?\s+at|began?|studied?|continued?|delved?|turned?\s+to|worked?\s+on)\b/i;
-    const we1  = sent.match(weRe);
-    if(we1){
-      const verbMap = {
-        'moved into':'During','move into':'During','explored':'During','explore':'During',
-        'looked at':'In','look at':'In','began':'During','begin':'During',
-        'studied':'During','study':'During','continued':'Continuing to',
-        'delved':'In','turned to':'Moving to','worked on':'Working on',
-      };
-      const mapped = verbMap[(we1[1]||'').toLowerCase()] || 'During';
-      const corrected = sent.replace(weRe, mapped);
-      if(corrected!==sent){
-        issues.push({section:'firstperson',type:'First-person wording',student:`${student} - ${area}`,
-          exactSent:sent,issue:`"${we1[0]}" — first-person "we" in a report card.`,fix:`Consider: "${corrected}"`});
-        continue;
-      }
-    }
-
-    // Reset lastIndex before testing
-    OUR_RE.lastIndex = 0;
-    const ourMatch = OUR_RE.exec(sent);
-    if(ourMatch){
-      const phrase    = ourMatch[1].trim();
-      const corrected = sent.replace(ourMatch[0], `the ${phrase}`);
-      issues.push({section:'firstperson',type:'First-person wording',student:`${student} - ${area}`,
-        exactSent:sent,issue:`"${ourMatch[0].trim()}" — "our" in a report card is first-person.`,fix:`"${corrected}"`});
-    }
-  }
-  return issues;
-}
-
-/* ─── I. TONE ─────────────────────────────────────────────────── */
-const TONE_RULES = [
-  { re:/\bbig\s+feelings?\b/gi, type:'Informal wording',
-    fn:(sent)=>({corrected:sent.replace(/\bbig\s+feelings?\b/gi,'strong emotions'),label:'"big feelings"'}) },
-  { re:/\b(becomes?|is|was|felt?|gets?)\s+dysregulated\b/gi, type:'Sensitive wording',
-    fn:(sent,m)=>({corrected:sent.replace(m[0],`${m[1]} continuing to develop strategies to manage focus and emotions`),label:'"dysregulated"'}) },
-  { re:/\bdysregulated\b/gi, type:'Sensitive wording',
-    fn:(sent)=>({corrected:sent.replace(/\bdysregulated\b/gi,'continuing to develop strategies to manage focus and emotions'),label:'"dysregulated"'}) },
-  { re:/\b(displays?|shows?|has)\s+a\s+high\s+level\s+of\s+intelligence\b/gi, type:'Fixed-trait wording',
-    fn:(sent,m)=>({corrected:sent.replace(m[0],`${m[1]} strong reasoning skills and intellectual curiosity`),label:'"high level of intelligence"'}) },
-  { re:/\b(showcase|show|display|demonstrate)\s+(his|her|their)\s+intelligence\b/gi, type:'Fixed-trait wording',
-    fn:(sent,m)=>({corrected:sent.replace(m[0],`${m[1]} ${m[2]} reasoning skills and curiosity`),label:'"intelligence"'}) },
-  { re:/\b(improving|improve)\s+(his|her|their)\s+attendance\b/gi, type:'Sensitive wording',
-    fn:(sent,m)=>({corrected:sent.replace(m[0],`consistent attendance will support ${m[2]} continued learning`),label:'"improving attendance"'}) },
-  { re:/\bdistracts?\s+others?\b/gi, type:'Sensitive wording',
-    fn:(sent)=>({corrected:sent.replace(/\bdistracts?\s+others?\b/gi,'can impact the learning environment'),label:'"distracts others"'}) },
-  { re:/\bpersonal\s+boundaries\b/gi, type:'Sensitive wording',
-    fn:(sent)=>({corrected:sent.replace(/\bpersonal\s+boundaries\b/gi,'awareness of personal space and respectful interactions'),label:'"personal boundaries"'}) },
-  { re:/\b(is|can\s+be|was)\s+lazy\b/gi, type:'Sensitive wording',
-    fn:(sent,m)=>({corrected:sent.replace(m[0],`${m[1]} developing greater independence and effort`),label:'"lazy"'}) },
-  { re:/\broman\s+toilet\s+cleaner\b/gi, type:'Inappropriate wording',
-    fn:(sent)=>({corrected:sent.replace(/\broman\s+toilet\s+cleaner\b/gi,'Roman sanitation worker'),label:'"Roman toilet cleaner"'}) },
-];
-
+/* F. Tone and sensitive wording ──────────────────────────── */
 function checkTone(seg){
-  const { student, area, text } = seg;
+  const { studentName, reportArea, comment } = seg;
   const issues = [];
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-    for(const rule of TONE_RULES){
-      const m = sent.match(rule.re);
-      if(!m) continue;
-      const result = rule.fn(sent,m);
-      if(!result||!result.corrected||result.corrected===sent) continue;
-      issues.push({section:'tone',type:rule.type,student:`${student} - ${area}`,
-        exactSent:sent,issue:`${result.label} — may not be suitable for a parent-facing report.`,fix:`"${result.corrected}"`});
-      break;
+  const seen   = new Set();
+
+  for(const {re, sug} of TONE_FLAGS){
+    re.lastIndex = 0;
+    const m = re.exec(comment);
+    if(m && !seen.has(m[0].toLowerCase())){
+      seen.add(m[0].toLowerCase());
+      // Find the sentence containing this word
+      const sent = splitSentences(comment).find(s => {
+        re.lastIndex = 0;
+        return re.test(s);
+      }) || comment.slice(0,120);
+      re.lastIndex = 0;
+      issues.push({
+        section:'tone',
+        type:'Sensitive wording',
+        studentArea:`${studentName} — ${reportArea}`,
+        currentWording: `"${sent.trim().slice(0,100)}"`,
+        concern: `"${m[0]}" may be too direct or negative for a parent report.`,
+        suggestedWording: `Consider: ${sug}`,
+      });
     }
   }
   return issues;
 }
 
-/* ─── J. WORDINESS ────────────────────────────────────────────── */
-const WORDY_RULES = [
-  { re:/\bnomenclature\b/gi, type:'Word choice',
-    fn:(sent)=>({corrected:sent.replace(/\bnomenclature\b/gi,'mathematical vocabulary')}) },
-  { re:/\bis\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi, type:'Wordy phrasing',
-    fn:(sent)=>({corrected:sent.replace(/\bis\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi,'understands')}) },
-  { re:/\bhas\s+been\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi, type:'Wordy phrasing',
-    fn:(sent)=>({corrected:sent.replace(/\bhas\s+been\s+able\s+to\s+demonstrate\s+an?\s+understanding\s+of\b/gi,'understands')}) },
-  { re:/\bhas\s+been\s+able\s+to\s+demonstrate\b/gi, type:'Wordy phrasing',
-    fn:(sent)=>({corrected:sent.replace(/\bhas\s+been\s+able\s+to\s+demonstrate\b/gi,'has demonstrated')}) },
-  { re:/\bis\s+able\s+to\s+demonstrate\b/gi, type:'Wordy phrasing',
-    fn:(sent)=>({corrected:sent.replace(/\bis\s+able\s+to\s+demonstrate\b/gi,'demonstrates')}) },
-  { re:/\bmake\s+a\s+historical\s+fiction\b/gi, type:'Word choice',
-    fn:(sent)=>({corrected:sent.replace(/\bmake\s+a\s+historical\s+fiction\b/gi,'write historical fiction')}) },
+/* G. Wordiness and informal wording ──────────────────────── */
+const WORDY = [
+  { re:/\bnomenclature\b/gi,               sug:'fraction vocabulary / mathematical vocabulary' },
+  { re:/\bRoman toilet cleaner\b/gi,       sug:'Roman sanitation worker' },
+  { re:/\bfoster(s|ed|ing)? independence and agency\b/gi, sug:'build independence' },
+  { re:/\bleverage[sd]?\b/gi,              sug:'use / apply' },
+  { re:/\butiliz(e|es|ed|ing)\b/gi,        sug:'use' },
+  { re:/\butilis(e|es|ed|ing)\b/gi,        sug:'use' },
+  { re:/\bin order to\b/gi,                sug:'to' },
+  { re:/\bdue to the fact that\b/gi,       sug:'because' },
+  { re:/\bat this point in time\b/gi,      sug:'now / currently' },
+  { re:/\bvery unique\b/gi,                sug:'"unique" — "unique" needs no intensifier' },
+  { re:/\bmore better\b/gi,                sug:'"better"' },
+  { re:/\bI'm\b/gi,                        sug:'"I am" — or rephrase to remove first person' },
+  { re:/\bdon\'?t\b/gi,                    sug:'"do not" — avoid contractions in reports' },
+  { re:/\bcan\'?t\b/gi,                    sug:'"cannot" — avoid contractions in reports' },
+  { re:/\bwon\'?t\b/gi,                    sug:'"will not" — avoid contractions in reports' },
+  { re:/\bisn\'?t\b/gi,                    sug:'"is not" — avoid contractions in reports' },
+  { re:/\baren\'?t\b/gi,                   sug:'"are not" — avoid contractions in reports' },
+  { re:/\bwasn\'?t\b/gi,                   sug:'"was not" — avoid contractions in reports' },
+  { re:/\bwe\'?re\b/gi,                    sug:'"we are" — or rephrase to remove first person' },
 ];
 
 function checkWordiness(seg){
-  const { student, area, text } = seg;
+  const { studentName, reportArea, comment } = seg;
   const issues = [];
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-    for(const rule of WORDY_RULES){
-      const m = sent.match(rule.re);
-      if(!m) continue;
-      const result = rule.fn(sent,m);
-      if(!result||!result.corrected||result.corrected===sent) continue;
-      issues.push({section:'wordy',type:rule.type,student:`${student} - ${area}`,
-        exactSent:sent,issue:`"${m[0]}" — wordy phrasing.`,fix:`"${result.corrected}"`});
-      break;
+  const seen   = new Set();
+  for(const {re, sug} of WORDY){
+    re.lastIndex = 0;
+    const m = re.exec(comment);
+    if(m && !seen.has(m[0].toLowerCase())){
+      seen.add(m[0].toLowerCase());
+      issues.push({
+        section:'wordiness', type:'Wording to improve',
+        studentArea:`${studentName} — ${reportArea}`,
+        whatToCheck:`"${m[0]}"`,
+        suggestedFix:`Consider: ${sug}`,
+      });
     }
   }
   return issues;
 }
 
-/* ─── K. DUPLICATION ─────────────────────────────────────────── */
+/* H. First-person language ───────────────────────────────── */
+const OUR_UNIT_RE = /\bour\s+(units?\s+of\s+inquiry|inquiry|unit|study|learning\s+community|biography\s+unit|topic|exploration)\b/gi;
+const WE_RE       = /\b(we|we've|we're|we'd)\b/gi;
+const I_RE        = /\b(I|I'm|I've|I'd|I'll)\b/g;
+
+function checkFirstPerson(seg){
+  const { studentName, reportArea, comment } = seg;
+  const issues = [];
+  const seen   = new Set();
+
+  OUR_UNIT_RE.lastIndex = 0;
+  let m = OUR_UNIT_RE.exec(comment);
+  while(m){
+    if(!seen.has('our'+m[0].toLowerCase())){
+      seen.add('our'+m[0].toLowerCase());
+      const fixed = m[0].replace(/\bour\b/gi, 'the');
+      issues.push({
+        section:'grammar', type:'First-person "our"',
+        studentArea:`${studentName} — ${reportArea}`,
+        whatToCheck:`"${m[0]}"`,
+        suggestedFix:`"${fixed}" — reports should use "the" not "our"`,
+      });
+    }
+    m = OUR_UNIT_RE.exec(comment);
+  }
+
+  WE_RE.lastIndex = 0;
+  const wm = WE_RE.exec(comment);
+  if(wm && !seen.has('we')){
+    seen.add('we');
+    issues.push({
+      section:'grammar', type:'First-person "we"',
+      studentArea:`${studentName} — ${reportArea}`,
+      whatToCheck:`"${wm[0]}" in comment`,
+      suggestedFix:'Rephrase to remove "we" — reports should be written about the student, not from the teacher\'s perspective.',
+    });
+  }
+
+  I_RE.lastIndex = 0;
+  const im = I_RE.exec(comment);
+  if(im && !seen.has('I')){
+    seen.add('I');
+    issues.push({
+      section:'grammar', type:'First-person "I"',
+      studentArea:`${studentName} — ${reportArea}`,
+      whatToCheck:`"${im[0]}" in comment`,
+      suggestedFix:'Rephrase to remove "I" — reports should focus on the student, not the teacher.',
+    });
+  }
+
+  return issues;
+}
+
+/* I. Duplication and contradiction ───────────────────────── */
 function checkDuplication(seg){
-  const { student, area, text } = seg;
+  const { studentName, reportArea, comment } = seg;
   const issues = [];
-  for(const sent of splitSentences(text)){
-    if(!isUsableSentence(sent)) continue;
-    if(/\b(furthermore|moreover)\b[^.]{0,90}\balso\b/i.test(sent)){
-      const corrected = sent.replace(/\balso\b/,'').replace(/\s{2,}/g,' ').trim();
-      issues.push({section:'duplication',type:'Redundant wording',student:`${student} - ${area}`,
-        exactSent:sent,
-        issue:`"furthermore"/"moreover" and "also" in the same sentence.`,
-        fix:`Remove "also": "${corrected}"`});
+  const seen   = new Set();
+  const sents  = splitSentences(comment).filter(isUsableSentence);
+
+  // Repeated transition words
+  const TRANSITIONS = ['Furthermore','Additionally','Moreover','However','Therefore','Also'];
+  const transFound = [];
+  for(const t of TRANSITIONS){
+    const re = new RegExp(`\\b${t}\\b`,'gi');
+    const count = (comment.match(re)||[]).length;
+    if(count >= 2) transFound.push(t);
+  }
+  for(const t of transFound){
+    if(!seen.has('trans'+t)){
+      seen.add('trans'+t);
+      issues.push({
+        section:'duplication', type:'Repeated transition',
+        studentArea:`${studentName} — ${reportArea}`,
+        whatToCheck:`"${t}" appears multiple times in this comment.`,
+        suggestedFix:`Use "${t}" only once. Vary with synonyms or restructure the sentence.`,
+      });
     }
+  }
+
+  // Contradiction check: "can X" vs "is learning to X" / "is developing X"
+  const CAN_RE  = /\bcan\s+(\w+)\b/gi;
+  const CANT_RE = /\bis (?:learning|developing|working on|beginning) to\s+(\w+)\b/gi;
+  const canVerbs  = [];
+  const cantVerbs = [];
+  let cm; CAN_RE.lastIndex=0;
+  while((cm=CAN_RE.exec(comment))) canVerbs.push(cm[1].toLowerCase());
+  let dm; CANT_RE.lastIndex=0;
+  while((dm=CANT_RE.exec(comment))) cantVerbs.push(dm[1].toLowerCase());
+
+  for(const v of canVerbs){
+    if(cantVerbs.includes(v) && !seen.has('contra'+v)){
+      seen.add('contra'+v);
+      issues.push({
+        section:'duplication', type:'Possible contradiction',
+        studentArea:`${studentName} — ${reportArea}`,
+        whatToCheck:`Comment says both "can ${v}" and "is learning to ${v}" (or similar).`,
+        suggestedFix:`Keep one version — either the student can do this (use "can ${v}") or is still developing it (use "is developing").`,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/* J. Level label ("an achieving student") ────────────────── */
+function checkLevelLabel(seg){
+  const { studentName, reportArea, comment } = seg;
+  const issues = [];
+  LEVEL_LABEL_RE.lastIndex = 0;
+  const m = LEVEL_LABEL_RE.exec(comment);
+  if(m){
+    issues.push({
+      section:'biggest', type:'Level label as description',
+      studentArea:`${studentName} — ${reportArea}`,
+      whatToCheck:`"${m[0].trim()}"`,
+      suggestedFix:`Do not use the student's level as a descriptor. Describe what they do: e.g. "demonstrates strong understanding of..." or name the specific skill.`,
+    });
   }
   return issues;
 }
 
-/* ─── L. LEVEL ALIGNMENT ─────────────────────────────────────── */
-const STRONG_RE = /\b(exemplary|remarkable|outstanding|exceptional|surpasses?|beyond\s+the\s+(curriculum|requirements?|expectations?)|extends?\s+(her|his|their)?\s+learning\s+beyond)\b/i;
-const WEAK_RE   = /\b(is\s+beginning\s+to|still\s+developing|finding\s+(this\s+)?quite\s+difficult|needs?\s+a\s+great\s+deal\s+of\s+support|with\s+significant\s+support|not\s+yet\s+able)\b/i;
+/* K. Level alignment ─────────────────────────────────────── */
+const STRONG_WORDS = /\b(exceptional|exemplary|outstanding|remarkable|insightful|extraordinary|mastery|sophisticated|beyond expectations|extends beyond)\b/gi;
+const WEAK_WORDS   = /\b(beginning to|rarely|seldom|with significant support|not yet|unable to)\b/gi;
 
 function checkLevelAlignment(seg){
-  const { student, area, text, level } = seg;
+  const { studentName, reportArea, comment, level } = seg;
   if(!level) return [];
-  const isHigh = /(Extending|Exceeding)/i.test(level);
-  const isLow  = /(Emerging|Beginning|Approaching)/i.test(level);
   const issues = [];
 
-  if(!isHigh && STRONG_RE.test(text)){
-    const m = text.match(STRONG_RE);
-    issues.push({section:'level',type:'Comment / level mismatch',student:`${student} - ${area}`,level,
-      concern:`The comment uses strong language ("${m[0]}") but the visible level is ${level}.`,
-      action:`Either raise the level or soften the comment to match ${level}.`});
+  if(/^(Developing|Emerging)$/i.test(level)){
+    STRONG_WORDS.lastIndex = 0;
+    const m = STRONG_WORDS.exec(comment);
+    if(m){
+      issues.push({
+        section:'level', type:'Level alignment',
+        studentArea:`${studentName} — ${reportArea}`,
+        visibleLevel: level,
+        whyCheck:`Comment uses "${m[0]}" but the level is ${level}.`,
+        possibleAction:`Either adjust the level upward or soften the wording to match a ${level} level.`,
+      });
+    }
   }
-  if(!isLow && WEAK_RE.test(text)){
-    const m = text.match(WEAK_RE);
-    issues.push({section:'level',type:'Comment / level mismatch',student:`${student} - ${area}`,level,
-      concern:`The comment uses language ("${m[0]}") that suggests a lower level than ${level}.`,
-      action:`Either lower the level or revise the comment to match ${level}.`});
+
+  if(/^(Achieving|Extending)$/i.test(level)){
+    WEAK_WORDS.lastIndex = 0;
+    const m = WEAK_WORDS.exec(comment);
+    if(m){
+      issues.push({
+        section:'level', type:'Level alignment',
+        studentArea:`${studentName} — ${reportArea}`,
+        visibleLevel: level,
+        whyCheck:`Comment uses "${m[0]}" but the level is ${level}.`,
+        possibleAction:`Either adjust the level downward or revise the wording to reflect the ${level} level.`,
+      });
+    }
   }
+
   return issues;
 }
 
-/* ═══════════════════════════════════════════════════════════════
+/* ═══════════════════════════════════════════════════════════
    RUN ALL CHECKS
-═══════════════════════════════════════════════════════════════ */
-function runAllChecks(segments, roster, fullText, settings){
-  const { spellingPref, checkFirstPersonFlag, checkLevelFlag, hasManualRoster } = settings;
-  const domStyle  = detectSpelling(fullText, spellingPref);
-  const allIssues = [];
+═══════════════════════════════════════════════════════════ */
 
-  checkSpellingConsistency(fullText, domStyle, segments).forEach(i=>allIssues.push(i));
+function runAllChecks(segments, roster, settings){
+  const { spellingPref, checkFirstPersonFlag, checkLevelFlag, hasManualRoster } = settings;
+  const allComments = segments.map(s=>s.comment);
+  const issues = [];
+
+  // Whole-document spelling consistency
+  checkSpellingConsistency(allComments, spellingPref).forEach(i=>issues.push(i));
 
   for(const seg of segments){
-    // Wrong-name check only runs when user has pasted a class list — auto-detected
-    // names are too unreliable and create false positives
-    if(hasManualRoster) checkWrongName(seg, roster).forEach(i=>allIssues.push(i));
-    checkPronouns(seg).forEach(i=>allIssues.push(i));
-    checkLevelLabel(seg).forEach(i=>allIssues.push(i));
-    checkTypos(seg).forEach(i=>allIssues.push(i));
-    checkGrammar(seg).forEach(i=>allIssues.push(i));
-    checkPunctuation(seg).forEach(i=>allIssues.push(i));
-    checkTone(seg).forEach(i=>allIssues.push(i));
-    if(checkFirstPersonFlag) checkFirstPerson(seg).forEach(i=>allIssues.push(i));
-    checkWordiness(seg).forEach(i=>allIssues.push(i));
-    checkDuplication(seg).forEach(i=>allIssues.push(i));
-    if(checkLevelFlag) checkLevelAlignment(seg).forEach(i=>allIssues.push(i));
+    // Wrong name — only when class list provided
+    if(hasManualRoster) checkWrongName(seg, roster).forEach(i=>issues.push(i));
+    checkPronouns(seg).forEach(i=>issues.push(i));
+    checkLevelLabel(seg).forEach(i=>issues.push(i));
+    checkTypos(seg).forEach(i=>issues.push(i));
+    checkGrammar(seg).forEach(i=>issues.push(i));
+    checkTone(seg).forEach(i=>issues.push(i));
+    checkWordiness(seg).forEach(i=>issues.push(i));
+    checkDuplication(seg).forEach(i=>issues.push(i));
+    if(checkFirstPersonFlag) checkFirstPerson(seg).forEach(i=>issues.push(i));
+    if(checkLevelFlag) checkLevelAlignment(seg).forEach(i=>issues.push(i));
   }
 
-  return { allIssues, domStyle };
+  // Consolidate: level labels → one "Whole document" row if 3+
+  return consolidate(issues);
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   CONSOLIDATION
-   When 3+ students share the same issue category, produce one
-   "Whole document" row instead of individual student rows.
-═══════════════════════════════════════════════════════════════ */
-function consolidateIssues(allIssues){
+function consolidate(issues){
   const skipIdx = new Set();
-  const docWide = [];
+  const extra   = [];
 
-  /* ── First-person "our [unit/inquiry]" ── */
-  const fpOurIdx = allIssues.reduce((acc,i,idx)=>{
-    if(i.section==='firstperson' && /\bour\s+/i.test(i.exactSent||'')) acc.push(idx);
-    return acc;
-  },[]);
-
-  if(fpOurIdx.length >= 3){
-    const fpIssues = fpOurIdx.map(idx=>allIssues[idx]);
-    // Collect up to 3 unique example phrases
-    const examples = [...new Set(fpIssues.map(i=>{
-      const m = (i.exactSent||'').match(/\bour\s+(?:[\w]+\s+){0,3}(?:units?\s+of\s+inquiry|inquiry|units?|study|project|exploration|learning\s+community)\b/i);
-      return m ? m[0].trim() : null;
-    }).filter(Boolean))].slice(0,3);
-
-    docWide.push({
-      section:'firstperson', type:'First-person "our" wording',
-      student:'Whole document',
-      issue:`${fpOurIdx.length} comments use first-person "our" — ${examples.map(e=>`"${e}"`).join(', ')}${fpOurIdx.length>examples.length?' and others':''}.`,
-      fix:`Change "our" to "the" in each case — e.g. "our Units of Inquiry" → "the Units of Inquiry", "our inquiry" → "the inquiry".`,
-    });
-    fpOurIdx.forEach(idx=>skipIdx.add(idx));
-  }
-
-  /* ── "an achieving/developing student" label ── */
-  const labelIdx = allIssues.reduce((acc,i,idx)=>{
-    if(i.type==='Level label as description') acc.push(idx);
-    return acc;
-  },[]);
-
-  if(labelIdx.length >= 1){
-    const labelIssues = labelIdx.map(idx=>allIssues[idx]);
-    const examples = [...new Set(labelIssues.map(i=>{
+  // Level label: 3+ occurrences → consolidate
+  const lblIdx = issues.reduce((acc,i,idx)=>{ if(i.type==='Level label as description') acc.push(idx); return acc; },[]);
+  if(lblIdx.length >= 3){
+    const examples = [...new Set(lblIdx.slice(0,3).map(idx=>{
       LEVEL_LABEL_RE.lastIndex=0;
-      const m = LEVEL_LABEL_RE.exec(i.exactSent||'');
-      return m ? m[0].trim() : null;
-    }).filter(Boolean))].slice(0,3);
-
-    docWide.push({
+      const m = LEVEL_LABEL_RE.exec(issues[idx].whatToCheck||'');
+      return m ? m[0].trim() : issues[idx].whatToCheck||'';
+    }))].slice(0,3);
+    extra.push({
       section:'biggest', type:'Level label as description',
-      student:'Whole document',
-      issue:`${labelIdx.length} comment${labelIdx.length>1?'s':''} use the student's level as a description (${examples.map(e=>`"${e}"`).join(', ')}${labelIdx.length>examples.length?'…':''}). IB PYP reports should not label students by their level.`,
-      fix:`Remove the label and describe what the student does instead — e.g. "an achieving student" → "demonstrates strong understanding of..." or simply describe their specific skill or behaviour.`,
+      studentArea:'Whole document',
+      whatToCheck:`${lblIdx.length} comments use a level label as a description (${examples.map(e=>`"${e}"`).join(', ')}…).`,
+      suggestedFix:`Do not describe students by their level label. Describe what they do instead.`,
     });
-    labelIdx.forEach(idx=>skipIdx.add(idx));
+    lblIdx.forEach(idx=>skipIdx.add(idx));
   }
 
-  const remaining = allIssues.filter((_,idx)=>!skipIdx.has(idx));
-  return { docWide, remaining };
+  // "our [unit]" first-person: 3+ → one whole-document row
+  const ourIdx = issues.reduce((acc,i,idx)=>{ if(i.type==='First-person "our"') acc.push(idx); return acc; },[]);
+  if(ourIdx.length >= 3){
+    const examples = [...new Set(ourIdx.slice(0,3).map(idx=>issues[idx].whatToCheck||''))].slice(0,3);
+    extra.push({
+      section:'grammar', type:'First-person "our" (whole document)',
+      studentArea:'Whole document',
+      whatToCheck:`${ourIdx.length} comments use "our" for the unit/inquiry (e.g. ${examples.map(e=>`${e}`).join(', ')}).`,
+      suggestedFix:`Change "our" to "the" throughout — e.g. "our Units of Inquiry" → "the Units of Inquiry".`,
+    });
+    ourIdx.forEach(idx=>skipIdx.add(idx));
+  }
+
+  const remaining = issues.filter((_,idx)=>!skipIdx.has(idx));
+  return [...extra, ...remaining];
 }
 
-/* ═══════════════════════════════════════════════════════════════
-   RENDER
-═══════════════════════════════════════════════════════════════ */
-function h(s){ return escH(s); }
+/* ═══════════════════════════════════════════════════════════
+   RENDERING
+═══════════════════════════════════════════════════════════ */
 
-/* Table 1 — Things to check (grammar, consistency, names, "our" pattern, etc.) */
-function renderMainTable(issues){
-  const rows = issues.map(i=>{
-    const isDoc = i.student === 'Whole document';
+function renderPreview(segments, skippedCount){
+  const tbody = document.getElementById('previewBody');
+  tbody.innerHTML = '';
 
-    // "Current issue" cell
-    let current;
-    if(isDoc){
-      current = `<span class="issue-note">${h(i.issue||i.usage||'')}</span>`;
-    } else if(i.exactSent){
-      current  = `<em class="exact-quote">${h(i.exactSent)}</em>`;
-      if(i.issue && i.issue !== i.exactSent){
-        current += `<div class="issue-note">${h(i.issue)}</div>`;
-      }
-    } else {
-      current = h(i.issue||i.usage||'');
-    }
+  segments.forEach(seg=>{
+    const tr = document.createElement('tr');
+    const preview = seg.comment.slice(0,90) + (seg.comment.length > 90 ? '…' : '');
+    tr.innerHTML = `
+      <td class="td-student">${h(seg.studentName)}</td>
+      <td>${h(seg.reportArea)}</td>
+      <td>${h(seg.level||'—')}</td>
+      <td class="td-comment-preview">${h(preview)}</td>
+      <td class="status-ready">&#10003; Ready</td>`;
+    tbody.appendChild(tr);
+  });
 
-    const fix   = h(i.fix||i.rec||'');
-    const badge = `<span class="type-badge${isDoc?' type-badge--doc':''}">${h(i.type||'')}</span>`;
+  const skipNote = document.getElementById('skipNote');
+  if(skippedCount > 0){
+    skipNote.hidden = false;
+    skipNote.innerHTML = `<strong>&#9888;</strong> ${skippedCount} section${skippedCount>1?'s were':' was'} skipped because the student name or report area could not be read clearly. Only clearly identified rows are shown above.`;
+  } else {
+    skipNote.hidden = true;
+  }
 
-    return `<tr${isDoc?' class="whole-doc-row"':''}>
-      <td class="td-student">${h(i.student)}</td>
-      <td>${badge}</td>
-      <td class="td-issue">${current}</td>
-      <td class="td-fix">${fix}</td>
-    </tr>`;
-  }).join('');
-
-  return `<div class="feedback-section">
-    <div class="section-heading">Things to check before final submission <span class="section-count">${issues.length}</span></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Student / Area</th><th>Issue type</th><th>Current issue</th><th>Suggested fix</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
+  document.getElementById('previewSection').hidden = false;
+  document.getElementById('previewSection').scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
-/* Table 2 — Tone and wording to soften */
-function renderToneTable(issues){
-  const rows = issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td><span class="type-badge">${h(i.type||'')}</span></td>
-    <td class="td-issue"><em class="exact-quote">${h(i.exactSent||'')}</em></td>
-    <td class="td-fix">${h(i.fix||'')}</td>
-  </tr>`).join('');
+function renderResults(issues, warnings, className){
+  const titleStr = className ? `${className} Report Card Feedback` : 'Report Card Feedback';
+  document.getElementById('resultsTitle').textContent = titleStr;
 
-  return `<div class="feedback-section">
-    <div class="section-heading">Tone and wording to soften <span class="section-count">${issues.length}</span></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Student / Area</th><th>Issue type</th><th>Current wording</th><th>Suggested wording</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
-}
-
-/* Table 3 — Comment and level alignment */
-function renderLevelTable(issues){
-  const rows = issues.map(i=>`<tr>
-    <td class="td-student">${h(i.student)}</td>
-    <td><span class="type-badge">${h(i.level||'')}</span></td>
-    <td class="td-concern">${h(i.concern||'')}</td>
-    <td class="td-fix">${h(i.action||'')}</td>
-  </tr>`).join('');
-
-  return `<div class="feedback-section">
-    <div class="section-heading">Comment and level alignment <span class="section-count">${issues.length}</span></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Student / Area</th><th>Visible level</th><th>Why to check</th><th>Possible action</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table></div>
-  </div>`;
-}
-
-function buildPriority(allIssues){
-  const items = [];
-  const wrongNames = allIssues.filter(i=>i.type==='Wrong name');
-  if(wrongNames.length) items.push(`Check ${wrongNames.length} possible wrong-name issue${wrongNames.length>1?'s':''} — see student rows above.`);
-  const pronouns = allIssues.filter(i=>i.type==='Pronoun inconsistency');
-  if(pronouns.length) items.push(`Fix pronoun inconsistency in: ${pronouns.map(i=>i.student).join(', ')}.`);
-  const typos = allIssues.filter(i=>i.section==='spelling'&&i.type==='Spelling error');
-  if(typos.length) items.push(`Correct ${typos.length} spelling error${typos.length>1?'s':''}.`);
-  const fp = allIssues.filter(i=>i.section==='firstperson');
-  if(fp.length) items.push(`Remove first-person "our"/"we" wording — found in ${fp.length} comment${fp.length>1?'s':''}.`);
-  const tone = allIssues.filter(i=>i.section==='tone');
-  if(tone.length) items.push(`Soften wording in ${tone.length} tone item${tone.length>1?'s':''}. See tone table.`);
-  const gram = allIssues.filter(i=>i.section==='grammar');
-  if(gram.length) items.push(`Fix ${gram.length} grammar/punctuation issue${gram.length>1?'s':''}.`);
-  const lev = allIssues.filter(i=>i.section==='level');
-  if(lev.length) items.push(`Review comment/level alignment for ${lev.map(i=>i.student).join(', ')}.`);
-  return items;
-}
-
-function renderPriority(items){
-  const box = document.getElementById('priorityBox');
-  const tbl = document.getElementById('priorityTable');
-  if(!items.length){ box.hidden=true; return; }
-  tbl.innerHTML = items.map((it,i)=>
-    `<tr><td class="priority-num">Action ${i+1}</td><td class="priority-action">${h(it)}</td></tr>`).join('');
-  box.hidden = false;
-}
-
-function renderResults(allIssues, warnings, fileName, className){
-  const title = className
-    ? `${className} — Report Card Feedback`
-    : (fileName ? `${fileName.replace(/\.[^.]+$/,'')} — Report Card Feedback` : 'Report Card Feedback');
-  document.getElementById('resultsTitle').textContent = title;
-
-  const warnBox  = document.getElementById('extractionWarning');
-  const warnList = document.getElementById('warningList');
-  if(warnings.length){
-    warnList.innerHTML = warnings.map(w=>`<li>${h(w)}</li>`).join('');
-    warnBox.hidden = false;
-  } else { warnBox.hidden = true; }
-
-  // Consolidate repeated patterns into "Whole document" rows
-  const { docWide, remaining } = consolidateIssues(allIssues);
-
-  // Table 1: main issues (doc-wide first, then student-specific)
-  const mainIssues = [
-    ...docWide,
-    ...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section)),
+  // Summary pills
+  const SECTIONS = [
+    { key:'biggest',    label:'Biggest fixes',      emoji:'🔴' },
+    { key:'names',      label:'Names & pronouns',   emoji:'🟡' },
+    { key:'spelling',   label:'Spelling',            emoji:'🟡' },
+    { key:'grammar',    label:'Grammar & style',     emoji:'🟡' },
+    { key:'tone',       label:'Tone',                emoji:'🟠' },
+    { key:'wordiness',  label:'Wording',             emoji:'🔵' },
+    { key:'duplication',label:'Duplication',         emoji:'🔵' },
+    { key:'level',      label:'Level alignment',     emoji:'🟢' },
   ];
+  const counts = {};
+  SECTIONS.forEach(s=>{ counts[s.key] = issues.filter(i=>i.section===s.key).length; });
+  const total = issues.length;
 
-  // Table 2: tone
-  const toneIssues = remaining.filter(i=>i.section==='tone');
+  const bar = document.getElementById('summaryBar');
+  bar.innerHTML = `<div class="summary-pill${total===0?' green':total<=5?' amber':' red'}"><span class="pill-count">${total}</span> total items</div>` +
+    SECTIONS.filter(s=>counts[s.key]>0).map(s=>
+      `<div class="summary-pill"><span class="pill-count">${counts[s.key]}</span> ${s.label}</div>`
+    ).join('');
 
-  // Table 3: level alignment
-  const levelIssues = remaining.filter(i=>i.section==='level');
+  // Warnings
+  const warnBox = document.getElementById('extractionWarning');
+  if(warnings.length > 0){
+    document.getElementById('warningList').innerHTML = warnings.map(w=>`<li>${h(w)}</li>`).join('');
+    warnBox.hidden = false;
+  } else {
+    warnBox.hidden = true;
+  }
 
-  const total = mainIssues.length + toneIssues.length + levelIssues.length;
-
-  document.getElementById('summaryBar').innerHTML = `
-    <div class="summary-pill ${total>10?'red':total>3?'amber':'green'}">
-      <span class="pill-count">${total}</span> items to review
-    </div>
-    ${mainIssues.length?`<div class="summary-pill amber"><span class="pill-count">${mainIssues.length}</span> grammar &amp; consistency</div>`:''}
-    ${toneIssues.length?`<div class="summary-pill amber"><span class="pill-count">${toneIssues.length}</span> tone items</div>`:''}
-    ${levelIssues.length?`<div class="summary-pill amber"><span class="pill-count">${levelIssues.length}</span> level alignment</div>`:''}
-    ${total===0?`<div class="summary-pill green"><span class="pill-count">&#10003;</span> No issues found</div>`:''}
-  `;
-
+  // Build feedback sections
   const body = document.getElementById('feedbackBody');
   body.innerHTML = '';
-  if(mainIssues.length)  body.innerHTML += renderMainTable(mainIssues);
-  if(toneIssues.length)  body.innerHTML += renderToneTable(toneIssues);
-  if(levelIssues.length) body.innerHTML += renderLevelTable(levelIssues);
 
-  renderPriority(buildPriority(allIssues));
+  if(total === 0){
+    body.innerHTML = '<div class="feedback-section"><div class="section-heading">No major issues found</div><div class="section-ok">&#10003; No major issues found. Please still complete a final teacher read-through before submitting reports.</div></div>';
+  } else {
+    SECTIONS.forEach(sec=>{
+      const secIssues = issues.filter(i=>i.section===sec.key);
+      if(secIssues.length === 0) return;
+
+      let tableHtml;
+      if(sec.key === 'tone'){
+        tableHtml = renderToneTable(secIssues);
+      } else if(sec.key === 'level'){
+        tableHtml = renderLevelTable(secIssues);
+      } else if(sec.key === 'spelling'){
+        tableHtml = renderSpellingTable(secIssues);
+      } else {
+        tableHtml = renderMainTable(secIssues);
+      }
+
+      const TITLES = {
+        biggest:'Biggest fixes needed',
+        names:'Name and pronoun consistency',
+        spelling:'Spelling and UK/US consistency',
+        grammar:'Grammar, punctuation, and style',
+        tone:'Tone — comments to soften',
+        wordiness:'Wordiness and informal wording',
+        duplication:'Duplication and contradiction',
+        level:'Comment and level alignment',
+      };
+
+      body.innerHTML += `<div class="feedback-section">
+        <div class="section-heading">${h(TITLES[sec.key]||sec.key)} <span class="section-count">${secIssues.length}</span></div>
+        ${tableHtml}
+      </div>`;
+    });
+  }
+
+  // Priority checklist
+  const priorities = buildPriorities(issues);
+  const pBox = document.getElementById('priorityBox');
+  if(priorities.length > 0){
+    document.getElementById('priorityTable').innerHTML = priorities.map((p,i)=>
+      `<tr><td class="priority-num">Priority ${i+1}</td><td class="priority-action">${h(p)}</td></tr>`
+    ).join('');
+    pBox.hidden = false;
+  } else {
+    pBox.hidden = true;
+  }
+
+  // Footer
+  document.getElementById('resultsFooter').textContent = total > 0
+    ? 'Overall: The reports are mostly polished and professional. The items above are mainly consistency, tone, and editing checks before final submission.'
+    : 'No major issues found. Please still complete a final teacher read-through before submitting reports.';
+
   document.getElementById('resultsSection').hidden = false;
-  document.getElementById('resultsSection').scrollIntoView({behavior:'smooth'});
+  document.getElementById('resultsSection').scrollIntoView({ behavior:'smooth', block:'start' });
 }
 
-/* ═══════════════════════════════════════════════════════════════
+function renderMainTable(issues){
+  const rows = issues.map(i=>{
+    const isDoc = i.studentArea === 'Whole document';
+    const badge = `<span class="type-badge${isDoc?' type-badge--doc':''}">${h(i.type||'')}</span>`;
+    const check = i.whatToCheck
+      ? `<em class="exact-quote">${h(i.whatToCheck)}</em>`
+      : `<span class="issue-note">${h(i.suggestedFix||'')}</span>`;
+    return `<tr${isDoc?' class="whole-doc-row"':''}>
+      <td class="td-student">${h(i.studentArea)}</td>
+      <td>${badge}</td>
+      <td class="td-issue">${check}</td>
+      <td class="td-fix">${h(i.suggestedFix||'')}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Student / Area</th><th>Issue type</th><th>What to check</th><th>Suggested fix</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderToneTable(issues){
+  const rows = issues.map(i=>`<tr>
+    <td class="td-student">${h(i.studentArea)}</td>
+    <td class="td-current">${h(i.currentWording||'')}</td>
+    <td class="td-concern">${h(i.concern||'')}</td>
+    <td class="td-suggest">${h(i.suggestedWording||'')}</td>
+  </tr>`).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Student / Area</th><th>Current wording</th><th>Concern</th><th>Suggested wording</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderSpellingTable(issues){
+  const rows = issues.map(i=>{
+    const isDoc = i.studentArea === 'Whole document';
+    return `<tr${isDoc?' class="whole-doc-row"':''}>
+      <td class="td-student">${h(i.studentArea)}</td>
+      <td>${h(i.whatToCheck||i.type||'')}</td>
+      <td class="td-fix">${h(i.suggestedFix||'')}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Student / Area</th><th>Current usage</th><th>Recommendation</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function renderLevelTable(issues){
+  const rows = issues.map(i=>`<tr>
+    <td class="td-student">${h(i.studentArea)}</td>
+    <td>${h(i.visibleLevel||'')}</td>
+    <td class="td-why">${h(i.whyCheck||'')}</td>
+    <td class="td-suggest">${h(i.possibleAction||'')}</td>
+  </tr>`).join('');
+  return `<div class="table-wrap"><table>
+    <thead><tr><th>Student / Area</th><th>Visible level</th><th>Why to check</th><th>Possible action</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+function buildPriorities(issues){
+  const items = [];
+  const biggest = issues.filter(i=>i.section==='biggest');
+  if(biggest.length > 0) items.push(`Fix ${biggest.length} high-priority issue${biggest.length>1?'s':''}: ${biggest.slice(0,3).map(i=>i.type).join(', ')}${biggest.length>3?' and others':''}.`);
+  if(issues.some(i=>i.section==='names')) items.push('Check name and pronoun consistency in flagged comments.');
+  if(issues.some(i=>i.section==='spelling')) items.push('Resolve spelling and UK/US consistency across the document.');
+  if(issues.some(i=>i.section==='tone')) items.push('Review tone comments and soften any sensitive wording.');
+  if(issues.some(i=>i.section==='grammar')) items.push('Correct grammar, punctuation, and first-person wording.');
+  if(issues.some(i=>i.section==='level')) items.push('Review comment/level alignment items before finalising levels.');
+  return items.slice(0,6);
+}
+
+/* ═══════════════════════════════════════════════════════════
    DOWNLOADS
-═══════════════════════════════════════════════════════════════ */
-function dlBlob(blob,name){
-  const url=URL.createObjectURL(blob);
+═══════════════════════════════════════════════════════════ */
+
+function triggerDownload(url, name){
   Object.assign(document.createElement('a'),{href:url,download:name}).click();
-  setTimeout(()=>URL.revokeObjectURL(url),3000);
 }
 
-function flatForExport(allIssues){
-  const { docWide, remaining } = consolidateIssues(allIssues);
-  const all = [
-    ...docWide,
-    ...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section)),
-    ...remaining.filter(i=>i.section==='tone'),
-    ...remaining.filter(i=>i.section==='level'),
+function downloadPdf(issues, title){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:'landscape', unit:'mm', format:'a4' });
+  const NAVY = [26, 58, 92];
+
+  doc.setFontSize(16); doc.setTextColor(...NAVY);
+  doc.text(title, 14, 18);
+  doc.setFontSize(10); doc.setTextColor(100);
+  doc.text('Only comments that need attention are included.', 14, 25);
+  doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`, 14, 30);
+
+  const SECTIONS = [
+    { key:'biggest',    label:'Biggest fixes needed' },
+    { key:'names',      label:'Name and pronoun consistency' },
+    { key:'spelling',   label:'Spelling and UK/US consistency' },
+    { key:'grammar',    label:'Grammar, punctuation, and style' },
+    { key:'tone',       label:'Tone — comments to soften' },
+    { key:'wordiness',  label:'Wordiness and informal wording' },
+    { key:'duplication',label:'Duplication and contradiction' },
+    { key:'level',      label:'Comment and level alignment' },
   ];
-  return all.map(i=>({
-    student: i.student||'Whole document',
-    type:    i.type||'',
-    current: i.exactSent||i.issue||i.usage||i.concern||'',
-    fix:     i.fix||i.rec||i.action||'',
-    section: i.section||'',
-  }));
-}
 
-function downloadCsv(allIssues,titleStr){
-  const flat = flatForExport(allIssues);
-  const csv  = [['Student / Area','Issue type','Current issue','Suggested fix'],
-    ...flat.map(r=>[r.student,r.type,r.current,r.fix])]
-    .map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-  dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),titleStr.replace(/\s+/g,'_')+'_feedback.csv');
-}
+  let y = 36;
 
-function downloadHtml(allIssues,titleStr,subtitle){
-  const { docWide, remaining } = consolidateIssues(allIssues);
-  const mainIssues  = [...docWide,...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section))];
-  const toneIssues  = remaining.filter(i=>i.section==='tone');
-  const levelIssues = remaining.filter(i=>i.section==='level');
+  SECTIONS.forEach(sec=>{
+    const secIssues = issues.filter(i=>i.section===sec.key);
+    if(!secIssues.length) return;
 
-  function tableHtml(title,headers,rows){
-    if(!rows.length) return '';
-    const head = headers.map(c=>`<th>${c}</th>`).join('');
-    const body = rows.join('');
-    return `<h2 style="color:#1a3a5c;font-size:14px;margin:20px 0 6px">${title}</h2>
-<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-  }
+    if(y > 170){ doc.addPage(); y = 16; }
 
-  const mainRows = mainIssues.map(i=>{
-    const isDoc = i.student==='Whole document';
-    const current = i.exactSent ? `<em>${h(i.exactSent)}</em>${i.issue&&i.issue!==i.exactSent?`<br><small>${h(i.issue)}</small>`:''}` : h(i.issue||i.usage||'');
-    return `<tr${isDoc?' style="background:#eff6ff"':''}>
-      <td><strong>${h(i.student)}</strong></td><td>${h(i.type||'')}</td>
-      <td>${current}</td><td style="color:#166534">${h(i.fix||i.rec||'')}</td></tr>`;
-  });
-  const toneRows = toneIssues.map(i=>`<tr>
-    <td><strong>${h(i.student)}</strong></td><td>${h(i.type||'')}</td>
-    <td><em>${h(i.exactSent||'')}</em></td><td style="color:#166534">${h(i.fix||'')}</td></tr>`);
-  const levelRows = levelIssues.map(i=>`<tr>
-    <td><strong>${h(i.student)}</strong></td><td>${h(i.level||'')}</td>
-    <td>${h(i.concern||'')}</td><td style="color:#166534">${h(i.action||'')}</td></tr>`);
-
-  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${h(titleStr)}</title>
-<style>
-body{font-family:Arial,sans-serif;margin:40px;font-size:13px;color:#1a2332}
-h1{color:#1a3a5c;font-size:18px;margin-bottom:4px}
-p.sub{color:#6b7280;font-size:12px;margin-bottom:20px}
-table{width:100%;border-collapse:collapse;margin-bottom:8px}
-thead th{background:#1a3a5c;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
-tbody td{padding:7px 10px;border-bottom:1px solid #f0f4f8;vertical-align:top;line-height:1.5}
-em{font-style:italic;color:#374151}
-small{font-size:11px;color:#6b7280}
-</style></head><body>
-<h1>${h(titleStr)}</h1><p class="sub">${h(subtitle)}</p>
-${tableHtml('Things to check before final submission',['Student / Area','Issue type','Current issue','Suggested fix'],mainRows)}
-${tableHtml('Tone and wording to soften',['Student / Area','Issue type','Current wording','Suggested wording'],toneRows)}
-${tableHtml('Comment and level alignment',['Student / Area','Visible level','Why to check','Possible action'],levelRows)}
-<p style="color:#6b7280;font-style:italic;font-size:12px;margin-top:20px">The reports are mostly polished and professional. The items above are mainly consistency, tone, and editing checks before final submission.</p>
-</body></html>`;
-  dlBlob(new Blob([html],{type:'text/html;charset=utf-8'}),titleStr.replace(/\s+/g,'_')+'_feedback.html');
-}
-
-function downloadPdf(allIssues,titleStr,subtitle){
-  const {jsPDF}=window.jspdf;
-  const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
-  const { docWide, remaining } = consolidateIssues(allIssues);
-  const mainIssues  = [...docWide,...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section))];
-  const toneIssues  = remaining.filter(i=>i.section==='tone');
-  const levelIssues = remaining.filter(i=>i.section==='level');
-
-  doc.setFontSize(16); doc.setTextColor(26,58,92);
-  doc.text(titleStr,14,15);
-  doc.setFontSize(8); doc.setTextColor(80,80,80);
-  const sub=doc.splitTextToSize(subtitle,260);
-  doc.text(sub,14,22);
-  doc.setFontSize(7); doc.setTextColor(130,130,130);
-  doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`,14,22+sub.length*4+2);
-
-  let startY = 22+sub.length*4+8;
-
-  if(mainIssues.length){
-    doc.setFontSize(8); doc.setTextColor(26,58,92); doc.setFont(undefined,'bold');
-    doc.text('Things to check before final submission',14,startY-2);
-    doc.setFont(undefined,'normal');
-    doc.autoTable({
-      startY,
-      head:[['Student / Area','Issue type','Current issue','Suggested fix']],
-      body:mainIssues.map(i=>[
-        i.student||'',
-        i.type||'',
-        i.exactSent ? `"${i.exactSent}"${i.issue&&i.issue!==i.exactSent?' — '+i.issue:''}` : (i.issue||i.usage||''),
-        i.fix||i.rec||'',
-      ]),
-      theme:'striped',
-      headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
-      bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
-      columnStyles:{0:{cellWidth:38},1:{cellWidth:30},2:{cellWidth:100},3:{cellWidth:90,textColor:[22,101,52]}},
-      alternateRowStyles:{fillColor:[248,250,255]},
-      didParseCell:(data)=>{
-        if(data.section==='body' && data.row.raw[0]==='Whole document'){
-          data.cell.styles.fillColor=[239,246,255];
-        }
-      },
-    });
-    startY = doc.lastAutoTable.finalY + 8;
-  }
-
-  if(toneIssues.length){
-    if(startY > 170){ doc.addPage(); startY = 14; }
-    doc.setFontSize(8); doc.setTextColor(26,58,92); doc.setFont(undefined,'bold');
-    doc.text('Tone and wording to soften',14,startY-2);
-    doc.setFont(undefined,'normal');
-    doc.autoTable({
-      startY,
-      head:[['Student / Area','Issue type','Current wording','Suggested wording']],
-      body:toneIssues.map(i=>[i.student||'',i.type||'',i.exactSent||'',i.fix||'']),
-      theme:'striped',
-      headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
-      bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
-      columnStyles:{0:{cellWidth:38},1:{cellWidth:30},2:{cellWidth:100},3:{cellWidth:90,textColor:[22,101,52]}},
-      alternateRowStyles:{fillColor:[248,250,255]},
-    });
-    startY = doc.lastAutoTable.finalY + 8;
-  }
-
-  if(levelIssues.length){
-    if(startY > 170){ doc.addPage(); startY = 14; }
-    doc.setFontSize(8); doc.setTextColor(26,58,92); doc.setFont(undefined,'bold');
-    doc.text('Comment and level alignment',14,startY-2);
-    doc.setFont(undefined,'normal');
-    doc.autoTable({
-      startY,
-      head:[['Student / Area','Visible level','Why to check','Possible action']],
-      body:levelIssues.map(i=>[i.student||'',i.level||'',i.concern||'',i.action||'']),
-      theme:'striped',
-      headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
-      bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
-      columnStyles:{0:{cellWidth:38},1:{cellWidth:22},2:{cellWidth:108},3:{cellWidth:90,textColor:[22,101,52]}},
-      alternateRowStyles:{fillColor:[248,250,255]},
-    });
-    startY = doc.lastAutoTable.finalY + 6;
-  }
-
-  if(startY < 175){
-    doc.setFontSize(7); doc.setTextColor(100,100,100);
-    doc.text('The reports are mostly polished and professional. The items above are mainly consistency, tone, and editing checks before final submission.',14,startY);
-  }
-  doc.save(titleStr.replace(/[\s—]+/g,'_')+'_feedback.pdf');
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   MAIN
-═══════════════════════════════════════════════════════════════ */
-async function processFile(file){
-  const ext = file.name.split('.').pop().toLowerCase();
-  if(ext==='doc'){
-    alert('Please convert this file to .docx first.\n\nOpen in Microsoft Word or Google Docs → File → Save as .docx, then upload again.');
-    return;
-  }
-  if(ext!=='docx'&&ext!=='pdf'){
-    alert('Please upload a .pdf or .docx file.');
-    return;
-  }
-
-  const className    = document.getElementById('classNameInput').value.trim();
-  const classListRaw = document.getElementById('classListInput').value.trim();
-  const manualRoster = classListRaw
-    ? new Set(classListRaw.split('\n').map(s=>s.trim()).filter(s=>s.length>=2))
-    : new Set();
-
-  let segments, roster, fullText;
-  const warnings = [];
-
-  try{
-    if(ext==='docx'){
-      const html   = await readDocxHtml(file);
-      const result = parseHtml(html, manualRoster);
-      segments = result.segments;
-      roster   = result.roster;
-      fullText = segments.map(s=>s.text).join('\n\n');
+    let body;
+    if(sec.key==='tone'){
+      body = secIssues.map(i=>[ i.studentArea||'', i.currentWording||'', i.concern||'', i.suggestedWording||'' ]);
+      doc.autoTable({ head:[['Student / Area','Current wording','Concern','Suggested wording']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:70},2:{cellWidth:50},3:{cellWidth:80}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
+    } else if(sec.key==='level'){
+      body = secIssues.map(i=>[ i.studentArea||'', i.visibleLevel||'', i.whyCheck||'', i.possibleAction||'' ]);
+      doc.autoTable({ head:[['Student / Area','Visible level','Why to check','Possible action']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:30},2:{cellWidth:80},3:{cellWidth:90}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
+    } else if(sec.key==='spelling'){
+      body = secIssues.map(i=>[ i.studentArea||'', i.whatToCheck||'', i.suggestedFix||'' ]);
+      doc.autoTable({ head:[['Student / Area','Current usage','Recommendation']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:100},2:{cellWidth:100}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
     } else {
-      const rawItems = await readPdfRaw(file);
-      const colInfo  = detectTableColumns(rawItems);
-
-      if(colInfo && colInfo.subjects.length >= 3){
-        const result = extractPdfTableSegments(rawItems, colInfo, manualRoster);
-        segments = result.segments;
-        roster   = result.roster;
-      }
-
-      // If column extraction found no students, fall back to linear text parsing
-      if(!segments || segments.length < 2){
-        fullText = reconstructLinearText(rawItems);
-        const q  = checkPdfQuality(fullText);
-        if(q==='empty'){
-          alert('No text could be extracted from this PDF.\n\nThis may be a scanned (image-only) PDF. Please use the .docx version for best results.');
-          return;
-        }
-        if(q==='garbled'){
-          alert('This PDF could not be read clearly — complex table layouts can cause extraction issues.\n\nPlease upload the .docx version for accurate results.');
-          return;
-        }
-        const fallback = parsePlainText(fullText, manualRoster);
-        segments = fallback.segments;
-        roster   = fallback.roster;
-      }
-
-      fullText = segments.map(s=>s.text).join('\n\n');
+      body = secIssues.map(i=>[ i.studentArea||'', i.type||'', i.whatToCheck||'', i.suggestedFix||'' ]);
+      doc.autoTable({ head:[['Student / Area','Issue type','What to check','Suggested fix']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:42},1:{cellWidth:38},2:{cellWidth:90},3:{cellWidth:78}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
     }
-  } catch(err){
-    alert('Could not read this file. Make sure it is not password-protected.\n\nError: '+err.message);
-    return;
-  }
 
-  if(!segments||segments.length===0){
-    warnings.push('The app could not identify any student sections in this file. For best results, paste a class list in Settings above, or use the .docx version.');
-  }
+    y = (doc.lastAutoTable?.finalY||y) + 8;
 
-  const spellingPref         = document.querySelector('input[name="spelling"]:checked')?.value||'auto';
-  const checkFirstPersonFlag = document.getElementById('chkFirstPerson').checked;
-  const checkLevelFlag       = document.getElementById('chkLevel').checked;
-
-  const hasManualRoster = manualRoster.size > 0;
-  const { allIssues } = runAllChecks(segments||[], roster||new Set(), fullText||'', {
-    spellingPref, checkFirstPersonFlag, checkLevelFlag, hasManualRoster,
+    if(y > 180){ doc.addPage(); y = 16; }
+    doc.setFontSize(11); doc.setTextColor(...NAVY); doc.setFont(undefined,'bold');
+    doc.text(sec.label, 14, y);
+    doc.setFont(undefined,'normal');
+    y += 4;
   });
 
-  const subtitle = 'Table of items to review before final submission.';
-  const titleStr = className ? `${className} Report Card Feedback` : 'Report Card Feedback';
+  // Footer note
+  if(y > 170){ doc.addPage(); y = 16; }
+  doc.setFontSize(9); doc.setTextColor(130); doc.setFont(undefined,'italic');
+  const footer = issues.length > 0
+    ? 'Overall: The reports are mostly polished and professional. The items above are consistency, tone, and editing checks before final submission.'
+    : 'No major issues found. Please still complete a final teacher read-through before submitting reports.';
+  doc.text(footer, 14, y+8, {maxWidth:260});
 
-  renderResults(allIssues, warnings, file.name, className);
-
-  const pdfFn  = ()=>downloadPdf(allIssues,titleStr,subtitle);
-  const htmlFn = ()=>downloadHtml(allIssues,titleStr,subtitle);
-  const csvFn  = ()=>downloadCsv(allIssues,titleStr);
-  ['dlPdf','dlPdf2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=pdfFn; });
-  ['dlHtml','dlHtml2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=htmlFn; });
-  ['dlCsv','dlCsv2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=csvFn; });
+  doc.save(`${title.replace(/\s+/g,'_')}_feedback.pdf`);
 }
 
-/* ─── EVENT LISTENERS ─────────────────────────────────────── */
-document.addEventListener('DOMContentLoaded',()=>{
-  const fileInput = document.getElementById('fileInput');
-  const dropZone  = document.getElementById('dropZone');
-  const fileNameEl= document.getElementById('fileName');
-  const checkBtn  = document.getElementById('checkBtn');
-  const spinner   = document.getElementById('spinner');
-  const toggle    = document.getElementById('settingsToggle');
-  const panel     = document.getElementById('settingsPanel');
-  const arrow     = document.getElementById('settingsArrow');
-  let chosenFile  = null;
+function downloadHtml(issues, title){
+  const SECTIONS = [
+    { key:'biggest',    label:'Biggest fixes needed' },
+    { key:'names',      label:'Name and pronoun consistency' },
+    { key:'spelling',   label:'Spelling and UK/US consistency' },
+    { key:'grammar',    label:'Grammar, punctuation, and style' },
+    { key:'tone',       label:'Tone — comments to soften' },
+    { key:'wordiness',  label:'Wordiness and informal wording' },
+    { key:'duplication',label:'Duplication and contradiction' },
+    { key:'level',      label:'Comment and level alignment' },
+  ];
+
+  const style = `body{font-family:Segoe UI,system-ui,sans-serif;max-width:1100px;margin:0 auto;padding:20px;background:#f0f4f8}
+    h1{color:#1a3a5c}h2{color:#1a3a5c;margin-top:28px;margin-bottom:8px;font-size:15px;background:#1a3a5c;color:#fff;padding:10px 16px;border-radius:6px}
+    table{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:13px}th{background:#1a3a5c;color:#fff;padding:8px 12px;text-align:left}
+    td{padding:9px 12px;border-bottom:1px solid #e5e7eb;vertical-align:top}tr:nth-child(even)td{background:#f8faff}
+    .whole-doc{background:#eff6ff!important;border-left:3px solid #3b82f6}.footer{color:#9ca3af;font-style:italic;margin-top:24px;text-align:center}`;
+
+  let body = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${h(title)}</title><style>${style}</style></head><body>
+    <h1>${h(title)}</h1><p style="color:#4b5563">Only comments that need attention are included. Generated ${new Date().toLocaleDateString('en-GB')}.</p>`;
+
+  SECTIONS.forEach(sec=>{
+    const secIssues = issues.filter(i=>i.section===sec.key);
+    if(!secIssues.length) return;
+    body += `<h2>${h(sec.label)} (${secIssues.length})</h2>`;
+    if(sec.key==='tone'){
+      body += `<table><thead><tr><th>Student / Area</th><th>Current wording</th><th>Concern</th><th>Suggested wording</th></tr></thead><tbody>`;
+      body += secIssues.map(i=>`<tr${i.studentArea==='Whole document'?' class="whole-doc"':''}><td>${h(i.studentArea)}</td><td><em>${h(i.currentWording)}</em></td><td>${h(i.concern)}</td><td>${h(i.suggestedWording)}</td></tr>`).join('');
+    } else if(sec.key==='level'){
+      body += `<table><thead><tr><th>Student / Area</th><th>Visible level</th><th>Why to check</th><th>Possible action</th></tr></thead><tbody>`;
+      body += secIssues.map(i=>`<tr><td>${h(i.studentArea)}</td><td>${h(i.visibleLevel)}</td><td><em>${h(i.whyCheck)}</em></td><td>${h(i.possibleAction)}</td></tr>`).join('');
+    } else if(sec.key==='spelling'){
+      body += `<table><thead><tr><th>Student / Area</th><th>Current usage</th><th>Recommendation</th></tr></thead><tbody>`;
+      body += secIssues.map(i=>`<tr${i.studentArea==='Whole document'?' class="whole-doc"':''}><td>${h(i.studentArea)}</td><td>${h(i.whatToCheck)}</td><td>${h(i.suggestedFix)}</td></tr>`).join('');
+    } else {
+      body += `<table><thead><tr><th>Student / Area</th><th>Issue type</th><th>What to check</th><th>Suggested fix</th></tr></thead><tbody>`;
+      body += secIssues.map(i=>`<tr${i.studentArea==='Whole document'?' class="whole-doc"':''}><td>${h(i.studentArea)}</td><td><strong>${h(i.type)}</strong></td><td><em>${h(i.whatToCheck)}</em></td><td>${h(i.suggestedFix)}</td></tr>`).join('');
+    }
+    body += `</tbody></table>`;
+  });
+
+  body += `<p class="footer">${issues.length>0?'Overall: The reports are mostly polished and professional. The items above are consistency, tone, and editing checks before final submission.':'No major issues found. Please still complete a final teacher read-through before submitting reports.'}</p>`;
+  body += `</body></html>`;
+
+  const blob = new Blob([body],{type:'text/html'});
+  triggerDownload(URL.createObjectURL(blob), `${title.replace(/\s+/g,'_')}_feedback.html`);
+}
+
+function downloadCsv(issues, title){
+  const rows = [['Student / Area','Section','Issue type','What to check','Suggested fix']];
+  issues.forEach(i=> rows.push([
+    i.studentArea||'',
+    i.section||'',
+    i.type||'',
+    (i.whatToCheck||i.currentWording||i.visibleLevel||'').replace(/"/g,'""'),
+    (i.suggestedFix||i.suggestedWording||i.possibleAction||'').replace(/"/g,'""'),
+  ]));
+  const csv = rows.map(r=>r.map(c=>`"${c}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv],{type:'text/csv'});
+  triggerDownload(URL.createObjectURL(blob), `${title.replace(/\s+/g,'_')}_feedback.csv`);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   PROGRESS ANIMATION
+═══════════════════════════════════════════════════════════ */
+
+function setProgress(fillId, labelId, pct, label){
+  const fill = document.getElementById(fillId);
+  const lbl  = document.getElementById(labelId);
+  if(fill) fill.style.width = pct + '%';
+  if(lbl)  lbl.textContent  = label;
+}
+
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+/* ═══════════════════════════════════════════════════════════
+   MAIN EVENT LISTENERS
+═══════════════════════════════════════════════════════════ */
+
+document.addEventListener('DOMContentLoaded', ()=>{
+
+  const fileInput    = document.getElementById('fileInput');
+  const dropZone     = document.getElementById('dropZone');
+  const parseBtn     = document.getElementById('parseBtn');
+  const checkBtn     = document.getElementById('checkBtn');
+  const settingsToggle = document.getElementById('settingsToggle');
+  const settingsPanel  = document.getElementById('settingsPanel');
+  const settingsArrow  = document.getElementById('settingsArrow');
+
+  let currentFile     = null;
+  let parsedSegments  = [];
+  let parsedRoster    = new Set();
+  let currentIssues   = [];
+  let currentTitle    = 'Report Card Feedback';
+
+  // ── File selection ──
 
   function setFile(f){
-    chosenFile=f;
-    fileNameEl.textContent=f?`Selected: ${f.name}`:'Accepts .pdf and .docx · For .doc files, save as .docx first';
-    checkBtn.disabled=!f;
+    if(!f) return;
+    currentFile = f;
+    const ext = f.name.split('.').pop().toLowerCase();
+
+    if(ext === 'doc'){
+      alert('Please convert .doc to .docx first.\n\nOld .doc files cannot be checked accurately in this browser-only tool. Open the file in Word and save as .docx.');
+      return;
+    }
+    if(ext !== 'pdf' && ext !== 'docx'){
+      alert('Please upload a .pdf or .docx file.');
+      return;
+    }
+
+    document.getElementById('fileNameLabel').textContent = f.name;
+    dropZone.classList.add('file-loaded');
+    parseBtn.disabled = false;
   }
 
-  toggle.addEventListener('click',()=>{
-    const open=!panel.hidden;
-    panel.hidden=open;
-    toggle.setAttribute('aria-expanded',String(!open));
-    arrow.classList.toggle('open',!open);
+  fileInput.addEventListener('change', ()=> setFile(fileInput.files[0]||null));
+  dropZone.addEventListener('dragover', e=>{ e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', ()=> dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e=>{
+    e.preventDefault(); dropZone.classList.remove('drag-over');
+    const f = e.dataTransfer.files[0];
+    if(f){ fileInput.files = e.dataTransfer.files; setFile(f); }
   });
 
-  fileInput.addEventListener('change',()=>setFile(fileInput.files[0]||null));
-  dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('drag-over');});
-  dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('drag-over'));
-  dropZone.addEventListener('drop',e=>{
-    e.preventDefault();dropZone.classList.remove('drag-over');
-    const f=e.dataTransfer.files[0]; if(f) setFile(f);
+  // ── Settings toggle ──
+
+  settingsToggle.addEventListener('click', ()=>{
+    const open = settingsToggle.getAttribute('aria-expanded') === 'true';
+    settingsToggle.setAttribute('aria-expanded', String(!open));
+    settingsPanel.hidden = open;
+    settingsArrow.classList.toggle('open', !open);
   });
 
-  checkBtn.addEventListener('click',async()=>{
-    if(!chosenFile) return;
-    checkBtn.disabled=true; spinner.hidden=false;
-    document.getElementById('resultsSection').hidden=true;
-    try{ await processFile(chosenFile); }
-    finally{ spinner.hidden=true; checkBtn.disabled=false; }
+  // ── Step 1: Parse file and show preview ──
+
+  parseBtn.addEventListener('click', async ()=>{
+    if(!currentFile) return;
+    parseBtn.disabled = true;
+
+    const progressWrap = document.getElementById('progressWrap');
+    progressWrap.hidden = false;
+    document.getElementById('previewSection').hidden = true;
+    document.getElementById('resultsSection').hidden = true;
+
+    const classListRaw = document.getElementById('classListInput').value.trim();
+    const manualRoster = classListRaw
+      ? new Set(classListRaw.split('\n').map(s=>s.trim()).filter(s=>s.length>=2))
+      : new Set();
+
+    const ext = currentFile.name.split('.').pop().toLowerCase();
+
+    try {
+      setProgress('progressFill','progressLabel', 15, 'Reading file…');
+      await sleep(300);
+      setProgress('progressFill','progressLabel', 35, 'Parsing report table…');
+      await sleep(200);
+
+      let result;
+      if(ext === 'docx'){
+        result = await parseDocxRows(currentFile, manualRoster);
+      } else {
+        result = await parsePdfRows(currentFile, manualRoster);
+      }
+
+      setProgress('progressFill','progressLabel', 80, 'Building preview…');
+      await sleep(200);
+
+      parsedSegments = result.segments || [];
+      parsedRoster   = result.roster || new Set();
+
+      if(result.noTable || parsedSegments.length === 0){
+        setProgress('progressFill','progressLabel', 100, 'Done');
+        progressWrap.hidden = true;
+        parseBtn.disabled = false;
+
+        if(ext === 'pdf'){
+          alert('This PDF does not have a clear table structure that can be read automatically.\n\nPlease upload the .docx version for accurate results.');
+        } else {
+          alert('No recognisable report card table was found in this file.\n\nMake sure the file contains a table with subject headings (Math, Language, UOI, Learner, etc.). If using a class list format, paste the student names in Settings above.');
+        }
+        return;
+      }
+
+      // Count skipped rows (segments marked low confidence or garbled)
+      const skippedCount = result.skipped || 0;
+
+      setProgress('progressFill','progressLabel', 100, `Found ${parsedSegments.length} comment rows`);
+      await sleep(300);
+      progressWrap.hidden = true;
+
+      renderPreview(parsedSegments, skippedCount);
+
+    } catch(err){
+      progressWrap.hidden = true;
+      parseBtn.disabled = false;
+      alert('Could not read this file.\n\n' + err.message);
+    }
+
+    parseBtn.disabled = false;
   });
+
+  // ── Step 2: Run checks ──
+
+  checkBtn.addEventListener('click', async ()=>{
+    if(!parsedSegments.length) return;
+    checkBtn.disabled = true;
+
+    const checkWrap = document.getElementById('checkProgressWrap');
+    checkWrap.hidden = false;
+    document.getElementById('resultsSection').hidden = true;
+
+    const classListRaw   = document.getElementById('classListInput').value.trim();
+    const hasManualRoster = classListRaw.trim().length > 0;
+    const spellingPref   = document.querySelector('input[name="spelling"]:checked')?.value || 'auto';
+    const checkFirstPerson = document.getElementById('chkFirstPerson').checked;
+    const checkLevel     = document.getElementById('chkLevel').checked;
+    const className      = document.getElementById('classNameInput').value.trim();
+
+    setProgress('checkProgressFill','checkProgressLabel', 20, 'Checking comments…');
+    await sleep(200);
+    setProgress('checkProgressFill','checkProgressLabel', 60, 'Running consistency checks…');
+    await sleep(200);
+
+    currentIssues = runAllChecks(parsedSegments, parsedRoster, {
+      spellingPref, checkFirstPersonFlag: checkFirstPerson, checkLevelFlag: checkLevel, hasManualRoster,
+    });
+
+    currentTitle = className ? `${className} Report Card Feedback` : 'Report Card Feedback';
+
+    setProgress('checkProgressFill','checkProgressLabel', 90, 'Building feedback report…');
+    await sleep(200);
+
+    const warnings = [];
+    if(!hasManualRoster && parsedSegments.length > 0){
+      warnings.push('No class list was provided — wrong-name detection is off. Paste one name per line in Settings to enable it.');
+    }
+
+    setProgress('checkProgressFill','checkProgressLabel', 100, 'Done');
+    await sleep(200);
+    checkWrap.hidden = true;
+
+    renderResults(currentIssues, warnings, className);
+
+    const pdfFn  = ()=>downloadPdf(currentIssues, currentTitle);
+    const htmlFn = ()=>downloadHtml(currentIssues, currentTitle);
+    const csvFn  = ()=>downloadCsv(currentIssues, currentTitle);
+    ['dlPdf','dlPdf2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=pdfFn; });
+    ['dlHtml','dlHtml2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=htmlFn; });
+    ['dlCsv','dlCsv2'].forEach(id=>{ const el=document.getElementById(id); if(el) el.onclick=csvFn; });
+
+    checkBtn.disabled = false;
+  });
+
 });
