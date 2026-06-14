@@ -714,12 +714,14 @@ function checkTone(seg){
   for(const {re, sug} of TONE_FLAGS){
     re.lastIndex = 0;
     const m = re.exec(comment);
+    re.lastIndex = 0;
     if(m && !seen.has(m[0].toLowerCase())){
       seen.add(m[0].toLowerCase());
-      // Find the sentence containing this word
       const sent = splitSentences(comment).find(s => {
         re.lastIndex = 0;
-        return re.test(s);
+        const hit = re.test(s);
+        re.lastIndex = 0;
+        return hit;
       }) || comment.slice(0,120);
       re.lastIndex = 0;
       issues.push({
@@ -765,6 +767,7 @@ function checkWordiness(seg){
   for(const {re, sug} of WORDY){
     re.lastIndex = 0;
     const m = re.exec(comment);
+    re.lastIndex = 0;
     if(m && !seen.has(m[0].toLowerCase())){
       seen.add(m[0].toLowerCase());
       issues.push({
@@ -1244,30 +1247,30 @@ function downloadPdf(issues, title){
     const secIssues = issues.filter(i=>i.section===sec.key);
     if(!secIssues.length) return;
 
-    if(y > 170){ doc.addPage(); y = 16; }
-
-    let body;
-    if(sec.key==='tone'){
-      body = secIssues.map(i=>[ i.studentArea||'', i.currentWording||'', i.concern||'', i.suggestedWording||'' ]);
-      doc.autoTable({ head:[['Student / Area','Current wording','Concern','Suggested wording']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:70},2:{cellWidth:50},3:{cellWidth:80}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
-    } else if(sec.key==='level'){
-      body = secIssues.map(i=>[ i.studentArea||'', i.visibleLevel||'', i.whyCheck||'', i.possibleAction||'' ]);
-      doc.autoTable({ head:[['Student / Area','Visible level','Why to check','Possible action']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:30},2:{cellWidth:80},3:{cellWidth:90}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
-    } else if(sec.key==='spelling'){
-      body = secIssues.map(i=>[ i.studentArea||'', i.whatToCheck||'', i.suggestedFix||'' ]);
-      doc.autoTable({ head:[['Student / Area','Current usage','Recommendation']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:100},2:{cellWidth:100}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
-    } else {
-      body = secIssues.map(i=>[ i.studentArea||'', i.type||'', i.whatToCheck||'', i.suggestedFix||'' ]);
-      doc.autoTable({ head:[['Student / Area','Issue type','What to check','Suggested fix']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:42},1:{cellWidth:38},2:{cellWidth:90},3:{cellWidth:78}}, margin:{left:14,right:14}, didDrawPage:(d)=>{ y=d.cursor.y; }, theme:'grid' });
-    }
-
-    y = (doc.lastAutoTable?.finalY||y) + 8;
-
-    if(y > 180){ doc.addPage(); y = 16; }
+    // Section heading first — page-break if near bottom
+    if(y > 175){ doc.addPage(); y = 16; }
     doc.setFontSize(11); doc.setTextColor(...NAVY); doc.setFont(undefined,'bold');
     doc.text(sec.label, 14, y);
     doc.setFont(undefined,'normal');
-    y += 4;
+    y += 6;
+
+    // Table immediately below heading
+    let body;
+    if(sec.key==='tone'){
+      body = secIssues.map(i=>[ i.studentArea||'', i.currentWording||'', i.concern||'', i.suggestedWording||'' ]);
+      doc.autoTable({ head:[['Student / Area','Current wording','Concern','Suggested wording']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:70},2:{cellWidth:50},3:{cellWidth:80}}, margin:{left:14,right:14}, theme:'grid' });
+    } else if(sec.key==='level'){
+      body = secIssues.map(i=>[ i.studentArea||'', i.visibleLevel||'', i.whyCheck||'', i.possibleAction||'' ]);
+      doc.autoTable({ head:[['Student / Area','Visible level','Why to check','Possible action']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:30},2:{cellWidth:80},3:{cellWidth:90}}, margin:{left:14,right:14}, theme:'grid' });
+    } else if(sec.key==='spelling'){
+      body = secIssues.map(i=>[ i.studentArea||'', i.whatToCheck||'', i.suggestedFix||'' ]);
+      doc.autoTable({ head:[['Student / Area','Current usage','Recommendation']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:45},1:{cellWidth:100},2:{cellWidth:100}}, margin:{left:14,right:14}, theme:'grid' });
+    } else {
+      body = secIssues.map(i=>[ i.studentArea||'', i.type||'', i.whatToCheck||'', i.suggestedFix||'' ]);
+      doc.autoTable({ head:[['Student / Area','Issue type','What to check','Suggested fix']], body, startY:y, headStyles:{fillColor:NAVY,fontSize:9}, styles:{fontSize:8,cellPadding:3}, columnStyles:{0:{cellWidth:42},1:{cellWidth:38},2:{cellWidth:90},3:{cellWidth:78}}, margin:{left:14,right:14}, theme:'grid' });
+    }
+
+    y = (doc.lastAutoTable?.finalY||y) + 10;
   });
 
   // Footer note
