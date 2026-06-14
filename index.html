@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Report Card Checker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div class="page">
+
+  <!-- HEADER -->
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">
+        <span class="logo-icon">&#10003;</span>
+        <span class="logo-text">Report Card Checker</span>
+      </div>
+      <p class="header-sub">Professional proofreading for whole-class report sets — runs entirely in your browser</p>
+    </div>
+  </header>
+
+  <!-- UPLOAD CARD -->
+  <main class="main-content">
+
+    <section class="card upload-card">
+      <h2 class="card-title">Upload your class report file</h2>
+      <p class="card-desc">Upload a whole-class report card document. The checker will find name/pronoun issues, spelling consistency, grammar, punctuation, tone, and clarity — and produce feedback in the same style as a human proofreader.</p>
+
+      <div class="drop-zone" id="dropZone">
+        <div class="drop-icon">&#128196;</div>
+        <p class="drop-main"><strong>Drag and drop your file here</strong>, or</p>
+        <label class="btn-primary" for="fileInput">Choose file</label>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc" hidden />
+        <p class="drop-hint" id="fileName">Accepts .pdf and .docx &nbsp;·&nbsp; For .doc files, save as .docx in Word first</p>
+      </div>
+
+      <!-- SETTINGS -->
+      <div class="settings-row">
+        <button class="settings-toggle" id="settingsToggle" aria-expanded="false">
+          <span>&#9881;&#65039; Settings</span>
+          <span class="toggle-arrow" id="settingsArrow">&#9660;</span>
+        </button>
+      </div>
+
+      <div class="settings-panel" id="settingsPanel" hidden>
+        <div class="settings-grid">
+
+          <div class="setting-block">
+            <div class="setting-title">Spelling style</div>
+            <label class="radio-row">
+              <input type="radio" name="spelling" value="auto" checked />
+              <span>Auto-detect consistency <span class="hint-text">(checks whether the document mixes UK and US spelling)</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="spelling" value="uk" />
+              <span>Prefer UK English <span class="hint-text">(flags American spellings as inconsistent)</span></span>
+            </label>
+            <label class="radio-row">
+              <input type="radio" name="spelling" value="us" />
+              <span>Prefer US English <span class="hint-text">(flags British spellings as inconsistent)</span></span>
+            </label>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-title">Additional checks</div>
+            <label class="check-row">
+              <input type="checkbox" id="chkFirstPerson" checked />
+              Flag first-person wording (we, our, I)
+            </label>
+            <label class="check-row">
+              <input type="checkbox" id="chkLevel" checked />
+              Check comment and level alignment (only if levels are visible in the file)
+            </label>
+          </div>
+
+          <div class="setting-block setting-block--wide">
+            <div class="setting-title">Class name <span class="hint-text">(optional — used in the feedback title)</span></div>
+            <input type="text" id="classNameInput" class="text-input" placeholder="e.g. Y4GM or 5A or Ms Johnson's class" />
+          </div>
+
+          <div class="setting-block setting-block--wide">
+            <div class="setting-title">Class list <span class="hint-text">(optional — paste one name per line to improve name detection)</span></div>
+            <textarea id="classListInput" class="textarea-input" rows="4"
+              placeholder="Ava Chen&#10;Sam Johansson&#10;Paujai Smith&#10;Keon Williams"></textarea>
+          </div>
+
+        </div>
+      </div>
+
+      <button class="btn-primary btn-check" id="checkBtn" disabled>
+        &#128270;&nbsp; Check Report Cards
+      </button>
+
+      <div class="spinner" id="spinner" hidden>
+        <div class="spin-ring"></div>
+        <p>Reading file and checking comments&hellip;</p>
+      </div>
+
+    </section>
+
+    <!-- HOW IT WORKS -->
+    <section class="how-it-works">
+      <div class="how-card">
+        <div class="how-icon">&#128203;</div>
+        <h3>What it checks</h3>
+        <ul class="how-list">
+          <li>Wrong student name (roster-based only)</li>
+          <li>Pronoun inconsistency within a comment</li>
+          <li>Spelling errors and UK/US consistency</li>
+          <li>Grammar: missing articles, agreement</li>
+          <li>Punctuation, spacing and hyphens</li>
+          <li>Sensitive or negative tone</li>
+          <li>First-person wording (we/our/I)</li>
+          <li>Wordiness and unclear language</li>
+          <li>Duplication and contradiction</li>
+          <li>Comment/level alignment</li>
+        </ul>
+      </div>
+      <div class="how-card">
+        <div class="how-icon">&#9997;&#65039;</div>
+        <h3>Style of feedback</h3>
+        <p>Feedback matches a professional human proofreader's style — simple tables with the exact issue, why it matters, and a clear suggested fix. No AI rewrites. No IB language suggestions. No confusing columns.</p>
+      </div>
+      <div class="how-card">
+        <div class="how-icon">&#128274;</div>
+        <h3>Private by design</h3>
+        <p>Everything runs in your browser. Your file is never uploaded to any server. No student data ever leaves your device.</p>
+      </div>
+    </section>
+
+    <!-- RESULTS SECTION -->
+    <section id="resultsSection" hidden>
+
+      <div class="results-header">
+        <div class="results-title-block">
+          <h2 id="resultsTitle">Report Card Feedback</h2>
+          <p class="results-subtitle">Only comments that need attention are included. Main report card comments were checked for name/pronoun consistency, spelling consistency, professional report-card tone, first-person wording/contractions, grammar, punctuation, spacing, duplication, and comment/level alignment.</p>
+        </div>
+        <div class="download-row">
+          <button class="btn-primary" id="dlPdf">&#11015;&nbsp; PDF</button>
+          <button class="btn-outline" id="dlHtml">&#11015;&nbsp; HTML</button>
+          <button class="btn-outline" id="dlCsv">&#11015;&nbsp; CSV</button>
+        </div>
+      </div>
+
+      <!-- Summary pills -->
+      <div class="summary-bar" id="summaryBar"></div>
+
+      <!-- Extraction warning -->
+      <div class="warning-box" id="extractionWarning" hidden>
+        <strong>&#9888; Extraction warning</strong>
+        <ul id="warningList"></ul>
+      </div>
+
+      <!-- Feedback sections rendered here -->
+      <div id="feedbackBody"></div>
+
+      <!-- Priority checklist -->
+      <div class="priority-box" id="priorityBox" hidden>
+        <h3 class="priority-title">&#9989;&nbsp; Priority checklist before submission</h3>
+        <ol id="priorityList"></ol>
+      </div>
+
+      <!-- Footer note -->
+      <p class="results-footer">Overall: The reports above show items to review before submission. Each suggestion is based on what is clearly present in the document — not a guess.</p>
+
+      <div class="download-row download-row--bottom">
+        <button class="btn-primary" id="dlPdf2">&#11015;&nbsp; Download PDF feedback</button>
+        <button class="btn-outline" id="dlHtml2">&#11015;&nbsp; Download HTML</button>
+        <button class="btn-outline" id="dlCsv2">&#11015;&nbsp; Download CSV</button>
+      </div>
+
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <p>Report Card Checker &nbsp;·&nbsp; All processing runs in your browser &nbsp;·&nbsp; No data is uploaded</p>
+  </footer>
+
+</div>
+
+<!-- CDN LIBRARIES -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script>
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+</script>
+<script src="script.js"></script>
+
+</body>
+</html>
