@@ -1,15 +1,22 @@
 /* ═══════════════════════════════════════════════════════════════
    REPORT CARD CHECKER — script.js
 
-   ACCURACY PRINCIPLES
-   · PDF table format: extract by column, never by Y-row
-   · Every issue must quote the exact sentence from the report
+   OUTPUT FORMAT: mirrors the Y5JK human proofreader style
+   · Table 1 — Things to review (grammar, consistency, names)
+       cols: Student / Area | Issue type | Current issue | Suggested fix
+       "Whole document" rows at top when 3+ students share a pattern
+   · Table 2 — Tone and wording to soften
+       cols: Student / Area | Issue type | Current wording | Suggested fix
+   · Table 3 — Comment and level alignment
+       cols: Student / Area | Visible level | Why to check | Possible action
+
+   ACCURACY RULES
+   · PDF table: extract by column, never by Y-row
+   · Every issue quotes the exact sentence from the report
    · Every suggested fix is the exact corrected sentence
-   · Only flag things the app is certain about
-   · Wrong-name: only if a different student's name appears
-     MID-sentence (not at the start of the first sentence)
-   · Area (Math / Language / UOI / Learner / Science / Specialist)
-     comes from the column header in the PDF / docx heading
+   · Only flag high-confidence issues
+   · Student / Area format: "Name - Area" (hyphen)
+   · 3+ students with the same issue → one "Whole document" row
 ═══════════════════════════════════════════════════════════════ */
 
 'use strict';
@@ -108,18 +115,6 @@ function cap(s)  { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 /* ═══════════════════════════════════════════════════════════════
    PDF READING — COLUMN-AWARE TABLE EXTRACTION
-
-   Report card PDFs are typically landscape tables:
-     Student | Math | Language | UOI | Learner
-
-   Standard Y-position grouping smashes all columns together.
-   Instead we:
-     1. Get all text items with X/Y positions
-     2. Find the header row (contains known subject names)
-     3. Use header X positions to define column boundaries
-     4. Extract each column separately
-     5. Parse student entries from column 0 (name / LEVEL rows)
-     6. Return clean {student, area, text, level} segments
 ═══════════════════════════════════════════════════════════════ */
 async function readPdfRaw(file){
   const buf = await file.arrayBuffer();
@@ -134,7 +129,7 @@ async function readPdfRaw(file){
       if(!t||!t.trim()) return;
       allItems.push({
         x:    item.transform[4],
-        y:    Math.round(vp.height - item.transform[5]),  // top-down Y
+        y:    Math.round(vp.height - item.transform[5]),
         text: t,
         page: p,
       });
@@ -143,11 +138,8 @@ async function readPdfRaw(file){
   return allItems;
 }
 
-/* Find column boundaries from the header row on page 1 */
 function detectTableColumns(allItems){
   const page1 = allItems.filter(i=>i.page===1);
-
-  // Group items by Y (within 4 points = same visual line)
   const yGroups = [];
   page1.forEach(item=>{
     const existing = yGroups.find(g=>Math.abs(g.y - item.y)<=4);
@@ -156,7 +148,6 @@ function detectTableColumns(allItems){
   });
   yGroups.forEach(g=>g.items.sort((a,b)=>a.x-b.x));
 
-  // Find the row that has 2+ known subject names
   let headerGroup = null;
   for(const g of yGroups){
     const hits = g.items.filter(i=>KNOWN_SUBJECTS.has(i.text.trim()));
@@ -164,13 +155,11 @@ function detectTableColumns(allItems){
   }
   if(!headerGroup || headerGroup.items.length < 3) return null;
 
-  // Column boundaries = midpoints between consecutive header X positions
   const hdrItems = headerGroup.items;
   const boundaries = [0];
   for(let i=1; i<hdrItems.length; i++){
     boundaries.push((hdrItems[i-1].x + hdrItems[i].x) / 2);
   }
-
   const subjects = hdrItems.map(h=>normaliseSubject(h.text.trim()));
   return { boundaries, subjects };
 }
@@ -183,7 +172,6 @@ function assignCol(x, boundaries){
   return c;
 }
 
-/* Merge raw items in a column into logical lines (same Y = same line) */
 function mergeColItems(items){
   const sorted = [...items].sort((a,b)=>
     a.page!==b.page ? a.page-b.page : a.y!==b.y ? a.y-b.y : a.x-b.x);
@@ -201,33 +189,28 @@ function mergeColItems(items){
   return lines;
 }
 
-/* Extract {student, area, text, level} segments from a table PDF */
 function extractPdfTableSegments(allItems, colInfo, manualRoster){
   const { boundaries, subjects } = colInfo;
-  const numSubjCols = subjects.length - 1; // exclude student-label column
+  const numSubjCols = subjects.length - 1;
 
-  // Split items by column
   const col0Raw  = [];
   const subjRaw  = Array.from({length:numSubjCols}, ()=>[]);
 
   allItems.forEach(item=>{
     const c = assignCol(item.x, boundaries);
-    if(c === 0)              col0Raw.push(item);
+    if(c === 0)               col0Raw.push(item);
     else if(c <= numSubjCols) subjRaw[c-1].push(item);
   });
 
-  const col0Lines  = mergeColItems(col0Raw);
-  const subjLines  = subjRaw.map(mergeColItems);
+  const col0Lines = mergeColItems(col0Raw);
+  const subjLines = subjRaw.map(mergeColItems);
 
-  // Build roster
   const roster = new Set(manualRoster||[]);
-
-  // Parse col0 for student names and LEVEL markers
   const LEVEL_RE = /^level$/i;
   const SKIP_RE  = /^(student|name)$/i;
 
-  const studentEntries = []; // {name, page, y}
-  const levelEntries   = []; // {page, y}
+  const studentEntries = [];
+  const levelEntries   = [];
 
   col0Lines.forEach(line=>{
     const t = line.text.trim();
@@ -246,7 +229,6 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
     const stu     = studentEntries[si];
     const nextStu = studentEntries[si+1];
 
-    // Find this student's LEVEL row (between stu and nextStu in col0 Y order)
     const levelEntry = levelEntries.find(lev=>{
       if(lev.page < stu.page) return false;
       if(lev.page === stu.page && lev.y <= stu.y) return false;
@@ -257,7 +239,6 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
       return true;
     });
 
-    // For each subject column, extract comment text in this student's Y range
     for(let ci=0; ci<numSubjCols; ci++){
       const commentLines = subjLines[ci].filter(line=>{
         if(line.page < stu.page) return false;
@@ -266,7 +247,6 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
           if(line.page > nextStu.page) return false;
           if(line.page === nextStu.page && line.y >= nextStu.y - 3) return false;
         }
-        // Exclude the LEVEL row
         if(levelEntry && line.page===levelEntry.page && Math.abs(line.y-levelEntry.y)<=6) return false;
         return true;
       });
@@ -274,7 +254,6 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
       const text = commentLines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
       if(!text || text.length<20) continue;
 
-      // Get the level value for this specific column
       let level = null;
       if(levelEntry){
         const lvlItem = subjRaw[ci].find(item=>
@@ -283,7 +262,7 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
         if(lvlItem) level = lvlItem.text.trim();
       }
 
-      const area = subjects[ci+1] || 'General'; // subjects[0]='Student', subjects[1]='Math', etc.
+      const area = subjects[ci+1] || 'General';
       segments.push({student:stu.name, area, text, level});
     }
   }
@@ -291,7 +270,6 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
   return { segments, roster };
 }
 
-/* Reconstruct plain text from raw items (linear / non-table PDFs) */
 function reconstructLinearText(allItems){
   const lineMap = new Map();
   allItems.forEach(item=>{
@@ -306,7 +284,6 @@ function reconstructLinearText(allItems){
     .join('\n');
 }
 
-/* ─── PDF QUALITY ─────────────────────────────────────────── */
 function checkPdfQuality(text){
   if(!text||text.trim().length<60) return 'empty';
   const lines = text.split('\n').filter(l=>l.trim().length>5);
@@ -321,7 +298,7 @@ function checkPdfQuality(text){
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   DOCX READING (HTML-based for structure detection)
+   DOCX READING
 ═══════════════════════════════════════════════════════════════ */
 async function readDocxHtml(file){
   return new Promise((res,rej)=>{
@@ -337,7 +314,6 @@ function looksLikeName(t, roster){
   if(t.length<2||t.length>45) return null;
   if(/[.!?,;:–—()\[\]{}]/.test(t)) return null;
   if(/\b(is|are|was|has|have|can|will|does|did|the|and|but|for|in|on|at|to|of|a|an|with|from|that|this|his|her|their|which|who)\b/i.test(t)) return null;
-
   if(roster && roster.size>0){
     for(const name of roster){
       const first = name.split(/\s+/)[0];
@@ -401,14 +377,12 @@ function parseHtml(html, manualRoster){
     const tag=el.tagName.toLowerCase();
     const txt=el.textContent.trim();
     if(!txt) return;
-
     const isHeading  = ['h1','h2','h3','h4'].includes(tag);
     const isBoldOnly = tag==='p' && (()=>{
       const bolds   = el.querySelectorAll('strong, b');
       const boldTxt = Array.from(bolds).map(b=>b.textContent).join('').trim();
       return boldTxt===txt && txt.length<50;
     })();
-
     if(isHeading||isBoldOnly){
       const name = looksLikeName(txt, builtRoster);
       const area = name ? null : looksLikeAreaHeading(txt);
@@ -418,7 +392,6 @@ function parseHtml(html, manualRoster){
     buf.push(txt);
   });
   flush();
-
   return { segments, roster:builtRoster };
 }
 
@@ -488,18 +461,9 @@ function isUsableSentence(s){
 
 /* ═══════════════════════════════════════════════════════════════
    CHECKS
-   Each check returns array of issue objects.
-   Every issue includes:
-     exactSent — the actual sentence from the report
-     fix       — the exact corrected sentence
 ═══════════════════════════════════════════════════════════════ */
 
-/* ─── A. WRONG NAME ─────────────────────────────────────────
-   Only flag when another student's name appears in the middle
-   of a sentence (not at the start of the comment).
-   With column-based PDF extraction, garbled-text false positives
-   are eliminated. This check catches genuine copy-paste errors.
-────────────────────────────────────────────────────────────── */
+/* ─── A. WRONG NAME ─────────────────────────────────────────── */
 function checkWrongName(seg, roster){
   const { student, area, text } = seg;
   const firstName = student.split(/[\s\-]+/)[0];
@@ -511,43 +475,33 @@ function checkWrongName(seg, roster){
     if(otherFirst.length<3 || NOT_NAMES.has(otherFirst)) continue;
 
     const re = new RegExp(`\\b${escRe(otherFirst)}\\b`,'g');
-
     const sents = splitSentences(text);
     for(const sent of sents){
       if(!isUsableSentence(sent)) continue;
       const mAll = [...sent.matchAll(re)];
       if(!mAll.length) continue;
-
-      // Skip if the current student's own name is also in this sentence
-      // (could be a legitimate comparison — very rare, but safe to skip)
       const ownRe = new RegExp(`\\b${escRe(firstName)}\\b`,'i');
       if(ownRe.test(sent)) continue;
-
-      // Skip if other student's name is the very first word of the first sentence
-      // (first sentence of a comment normally starts with the student's own name;
-      //  if another name is first instead, that IS suspicious — but only flag
-      //  if the name clearly reads as the subject of the sentence)
       const firstSent = sents[0];
       if(sent === firstSent){
         const firstWord = sent.trim().split(/\s+/)[0].replace(/[^a-zA-Z]/g,'');
-        if(firstWord.toLowerCase() === firstName.toLowerCase()) continue; // own name first — fine
+        if(firstWord.toLowerCase() === firstName.toLowerCase()) continue;
       }
-
       const correctedSent = sent.replace(re, firstName);
       issues.push({
-        section:'biggest', type:'Wrong name',
-        student:`${student} — ${area}`,
+        section:'names', type:'Wrong name',
+        student:`${student} - ${area}`,
         exactSent: sent,
-        issue:`"${otherFirst}" appears in ${firstName}'s ${area} comment — may be a copy-paste error from another student's report.`,
+        issue:`"${otherFirst}" appears in ${firstName}'s ${area} comment — possible copy-paste error from another student's report.`,
         fix:`If so, change to: "${correctedSent}"`,
       });
-      break; // one flag per other student per section
+      break;
     }
   }
   return issues;
 }
 
-/* ─── B. PRONOUN INCONSISTENCY ─────────────────────────────── */
+/* ─── B. PRONOUN INCONSISTENCY ──────────────────────────────── */
 function checkPronouns(seg){
   const { student, area, text } = seg;
   const sents    = splitSentences(text).filter(isUsableSentence);
@@ -557,18 +511,17 @@ function checkPronouns(seg){
   if(heSents.length>0 && sheSents.length>0){
     return [{
       section:'names', type:'Pronoun inconsistency',
-      student:`${student} — ${area}`,
-      exactSent:`"${heSents[0].trim()}" … "${sheSents[0].trim()}"`,
+      student:`${student} - ${area}`,
+      exactSent:`"${heSents[0].trim()}" / "${sheSents[0].trim()}"`,
       issue:`This ${area} comment uses both he/him/his and she/her pronouns.`,
-      fix:`Choose one set of pronouns and use it consistently throughout ${firstName(student)}'s ${area} comment.`,
+      fix:`Choose one set of pronouns and use it consistently throughout the ${area} comment.`,
     }];
   }
   return [];
 }
-function firstName(s){ return s.split(/[\s\-]+/)[0]; }
 
 /* ─── C. LEVEL LABEL ("an achieving student") ──────────────── */
-const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+(student|learner|child)\b/gi;
+const LEVEL_LABEL_RE = /\b(an?\s+)(achieving|developing|emerging|extending|beginning|approaching|exceeding)\s+(student|learner|child|language\s+student)\b/gi;
 
 function checkLevelLabel(seg){
   const { student, area, text } = seg;
@@ -579,14 +532,14 @@ function checkLevelLabel(seg){
     const m  = re.exec(sent);
     if(m){
       const lvlWord   = cap(m[2]);
-      const noun      = m[3];
+      const noun      = m[3].replace(/\s+student$/,' student');
       const corrected = sent.replace(new RegExp(escRe(m[0]),'gi'),
-        `a ${noun} working at an ${lvlWord} level`);
+        `a student working at an ${lvlWord} level`);
       issues.push({
-        section:'biggest', type:'Awkward level label',
-        student:`${student} — ${area}`,
+        section:'biggest', type:'Level label as description',
+        student:`${student} - ${area}`,
         exactSent: sent,
-        issue:`"${m[0].trim()}" labels the student by their level. IB reports prefer describing what the student does.`,
+        issue:`"${m[0].trim()}" — labels the student by their level rather than describing what they do.`,
         fix:`"${corrected}"`,
       });
     }
@@ -610,10 +563,10 @@ function checkTypos(seg){
         const corrected = sent.replace(re, right);
         issues.push({
           section:'spelling', type:'Spelling error',
-          student:`${student} — ${area}`,
-          word:`${m[0]} → ${right}`,
-          usage:`Found in the ${area} comment: "${m[0]}"`,
-          rec:`Corrected sentence: "${corrected}"`,
+          student:`${student} - ${area}`,
+          exactSent: sent,
+          issue:`"${m[0]}" — should be "${right}".`,
+          fix:`"${corrected}"`,
         });
       }
     }
@@ -652,7 +605,12 @@ function checkSpellingConsistency(fullText, domStyle, allSegments){
             seen.add(key);
           }
         }
-        if(m) issues.push({section:'spelling', word:`${pair.usW} / ${pair.ukW}`, usage:concern, rec});
+        if(m) issues.push({
+          section:'spelling', type:'Spelling consistency',
+          student:'Whole document',
+          issue: concern,
+          fix: rec,
+        });
       }
     }
   }
@@ -709,7 +667,7 @@ function checkGrammar(seg){
         const word      = m[1];
         const corrected = sent.replace(re,`an ${word}`);
         if(/\ban\s+a[n]?\b/i.test(corrected)) continue;
-        issues.push({section:'grammar',type:'Grammar',student:`${student} — ${area}`,
+        issues.push({section:'grammar',type:'Grammar (a/an)',student:`${student} - ${area}`,
           exactSent:sent,issue:`"a ${word}" — needs "an" before a vowel sound.`,fix:`"${corrected}"`});
         break;
       }
@@ -719,7 +677,7 @@ function checkGrammar(seg){
       if(m){
         const word      = m[1];
         const corrected = sent.replace(re,`a ${word}`);
-        issues.push({section:'grammar',type:'Grammar',student:`${student} — ${area}`,
+        issues.push({section:'grammar',type:'Grammar (a/an)',student:`${student} - ${area}`,
           exactSent:sent,issue:`"an ${word}" — "${word}" starts with a consonant sound; use "a".`,fix:`"${corrected}"`});
         break;
       }
@@ -729,7 +687,7 @@ function checkGrammar(seg){
       if(m){
         const corrected = fn(sent,m);
         if(corrected&&corrected!==sent){
-          issues.push({section:'grammar',type:'Missing word',student:`${student} — ${area}`,
+          issues.push({section:'grammar',type:'Missing word',student:`${student} - ${area}`,
             exactSent:sent,issue:`"${m[0]}" — missing the article "a".`,fix:`"${corrected}"`});
           break;
         }
@@ -740,7 +698,7 @@ function checkGrammar(seg){
       if(m){
         const corrected = fn(sent,m);
         if(corrected&&corrected!==sent){
-          issues.push({section:'grammar',type:'Hyphenation',student:`${student} — ${area}`,
+          issues.push({section:'grammar',type:'Hyphenation',student:`${student} - ${area}`,
             exactSent:sent,issue:`"${m[0]}" — compound adjective needs a hyphen.`,fix:`"${corrected}"`});
           break;
         }
@@ -760,8 +718,8 @@ function checkPunctuation(seg){
   let sm;
   while((sm=spaceRe.exec(text))!==null){ spaceMatches.push(sm); if(spaceMatches.length>=2) break; }
   for(const sm of spaceMatches){
-    issues.push({section:'grammar',type:'Spacing',student:`${student} — ${area}`,
-      exactSent:`"...${sm[0]}..."`,
+    issues.push({section:'grammar',type:'Missing space',student:`${student} - ${area}`,
+      exactSent:`"…${sm[0]}…"`,
       issue:`Missing space after full stop: "${sm[0]}"`,
       fix:`Change "${sm[0]}" to "${sm[1]}. ${sm[2]}"`});
   }
@@ -769,13 +727,19 @@ function checkPunctuation(seg){
   const dotRe = /([a-z]{2,})\.\s+\.|([a-z]{2,})\.\./g;
   const dm    = dotRe.exec(text);
   if(dm){
-    issues.push({section:'grammar',type:'Punctuation',student:`${student} — ${area}`,
+    issues.push({section:'grammar',type:'Punctuation',student:`${student} - ${area}`,
       exactSent:`"${dm[0]}"`,issue:`Extra full stop: "${dm[0]}"`,fix:`Remove the extra full stop.`});
   }
   return issues;
 }
 
 /* ─── H. FIRST-PERSON WORDING ──────────────────────────────── */
+// Matches "our" followed by 0-3 optional words then a unit-type keyword.
+// Also matches "our [unit-keyword]" directly (no words before keyword).
+// Examples caught: "our Units of Inquiry", "our inquiry into forces",
+//   "our Statistics inquiry", "our learning community", "our recent units"
+const OUR_RE = /\bour\s+((?:(?!units?\s+of\s+inquiry)[\w]+\s+){0,3}(?:units?\s+of\s+inquiry|units?|inquiry|inquiries|study|project|exploration|learning\s+community|Statistics\s+(?:and\s+Probability\s+)?(?:inquiry|unit)|advertising\s+unit))\b/gi;
+
 function checkFirstPerson(seg){
   const { student, area, text } = seg;
   const issues = [];
@@ -794,17 +758,20 @@ function checkFirstPerson(seg){
       const mapped = verbMap[(we1[1]||'').toLowerCase()] || 'During';
       const corrected = sent.replace(weRe, mapped);
       if(corrected!==sent){
-        issues.push({section:'firstperson',type:'First-person wording',student:`${student} — ${area}`,
+        issues.push({section:'firstperson',type:'First-person wording',student:`${student} - ${area}`,
           exactSent:sent,issue:`"${we1[0]}" — first-person "we" in a report card.`,fix:`Consider: "${corrected}"`});
         continue;
       }
     }
 
-    const ourUnit = sent.match(/\bour\s+(\w+(?:\s+\w+)?)\s+(unit|study|investigation|inquiry|work|project|learning|focus|exploration|theme|units?)\b/i);
-    if(ourUnit){
-      const corrected = sent.replace(ourUnit[0],`the ${ourUnit[1]} ${ourUnit[2]}`);
-      issues.push({section:'firstperson',type:'First-person wording',student:`${student} — ${area}`,
-        exactSent:sent,issue:`"${ourUnit[0]}" — "our" in a report card is first-person.`,fix:`"${corrected}"`});
+    // Reset lastIndex before testing
+    OUR_RE.lastIndex = 0;
+    const ourMatch = OUR_RE.exec(sent);
+    if(ourMatch){
+      const phrase    = ourMatch[1].trim();
+      const corrected = sent.replace(ourMatch[0], `the ${phrase}`);
+      issues.push({section:'firstperson',type:'First-person wording',student:`${student} - ${area}`,
+        exactSent:sent,issue:`"${ourMatch[0].trim()}" — "our" in a report card is first-person.`,fix:`"${corrected}"`});
     }
   }
   return issues;
@@ -844,8 +811,8 @@ function checkTone(seg){
       if(!m) continue;
       const result = rule.fn(sent,m);
       if(!result||!result.corrected||result.corrected===sent) continue;
-      issues.push({section:'tone',type:rule.type,student:`${student} — ${area}`,
-        exactSent:sent,issue:`${result.label} — this wording may not be suitable for a parent-facing report.`,fix:`"${result.corrected}"`});
+      issues.push({section:'tone',type:rule.type,student:`${student} - ${area}`,
+        exactSent:sent,issue:`${result.label} — may not be suitable for a parent-facing report.`,fix:`"${result.corrected}"`});
       break;
     }
   }
@@ -878,8 +845,8 @@ function checkWordiness(seg){
       if(!m) continue;
       const result = rule.fn(sent,m);
       if(!result||!result.corrected||result.corrected===sent) continue;
-      issues.push({section:'wordy',type:rule.type,student:`${student} — ${area}`,
-        exactSent:sent,issue:`"${m[0]}" — wordy or unclear phrasing.`,fix:`"${result.corrected}"`});
+      issues.push({section:'wordy',type:rule.type,student:`${student} - ${area}`,
+        exactSent:sent,issue:`"${m[0]}" — wordy phrasing.`,fix:`"${result.corrected}"`});
       break;
     }
   }
@@ -894,9 +861,9 @@ function checkDuplication(seg){
     if(!isUsableSentence(sent)) continue;
     if(/\b(furthermore|moreover)\b[^.]{0,90}\balso\b/i.test(sent)){
       const corrected = sent.replace(/\balso\b/,'').replace(/\s{2,}/g,' ').trim();
-      issues.push({section:'duplication',type:'Redundant wording',student:`${student} — ${area}`,
+      issues.push({section:'duplication',type:'Redundant wording',student:`${student} - ${area}`,
         exactSent:sent,
-        issue:`"furthermore"/"moreover" and "also" in the same sentence — redundant.`,
+        issue:`"furthermore"/"moreover" and "also" in the same sentence.`,
         fix:`Remove "also": "${corrected}"`});
     }
   }
@@ -916,13 +883,13 @@ function checkLevelAlignment(seg){
 
   if(!isHigh && STRONG_RE.test(text)){
     const m = text.match(STRONG_RE);
-    issues.push({section:'level',type:'Level / comment mismatch',student:`${student} — ${area}`,level,
-      concern:`The comment uses very strong language ("${m[0]}") but the level is ${level}.`,
-      action:`Either raise the level or soften the comment wording.`});
+    issues.push({section:'level',type:'Comment / level mismatch',student:`${student} - ${area}`,level,
+      concern:`The comment uses strong language ("${m[0]}") but the visible level is ${level}.`,
+      action:`Either raise the level or soften the comment to match ${level}.`});
   }
   if(!isLow && WEAK_RE.test(text)){
     const m = text.match(WEAK_RE);
-    issues.push({section:'level',type:'Level / comment mismatch',student:`${student} — ${area}`,level,
+    issues.push({section:'level',type:'Comment / level mismatch',student:`${student} - ${area}`,level,
       concern:`The comment uses language ("${m[0]}") that suggests a lower level than ${level}.`,
       action:`Either lower the level or revise the comment to match ${level}.`});
   }
@@ -957,120 +924,157 @@ function runAllChecks(segments, roster, fullText, settings){
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   CONSOLIDATION
+   When 3+ students share the same issue category, produce one
+   "Whole document" row instead of individual student rows.
+═══════════════════════════════════════════════════════════════ */
+function consolidateIssues(allIssues){
+  const skipIdx = new Set();
+  const docWide = [];
+
+  /* ── First-person "our [unit/inquiry]" ── */
+  const fpOurIdx = allIssues.reduce((acc,i,idx)=>{
+    if(i.section==='firstperson' && /\bour\s+/i.test(i.exactSent||'')) acc.push(idx);
+    return acc;
+  },[]);
+
+  if(fpOurIdx.length >= 3){
+    const fpIssues = fpOurIdx.map(idx=>allIssues[idx]);
+    // Collect up to 3 unique example phrases
+    const examples = [...new Set(fpIssues.map(i=>{
+      const m = (i.exactSent||'').match(/\bour\s+(?:[\w]+\s+){0,3}(?:units?\s+of\s+inquiry|inquiry|units?|study|project|exploration|learning\s+community)\b/i);
+      return m ? m[0].trim() : null;
+    }).filter(Boolean))].slice(0,3);
+
+    docWide.push({
+      section:'firstperson', type:'First-person "our" wording',
+      student:'Whole document',
+      issue:`${fpOurIdx.length} comments use first-person "our" — ${examples.map(e=>`"${e}"`).join(', ')}${fpOurIdx.length>examples.length?' and others':''}.`,
+      fix:`Change "our" to "the" in each case — e.g. "our Units of Inquiry" → "the Units of Inquiry", "our inquiry" → "the inquiry".`,
+    });
+    fpOurIdx.forEach(idx=>skipIdx.add(idx));
+  }
+
+  /* ── "an achieving/developing student" label ── */
+  const labelIdx = allIssues.reduce((acc,i,idx)=>{
+    if(i.type==='Level label as description') acc.push(idx);
+    return acc;
+  },[]);
+
+  if(labelIdx.length >= 3){
+    const labelIssues = labelIdx.map(idx=>allIssues[idx]);
+    const examples = [...new Set(labelIssues.map(i=>{
+      LEVEL_LABEL_RE.lastIndex=0;
+      const m = LEVEL_LABEL_RE.exec(i.exactSent||'');
+      return m ? m[0].trim() : null;
+    }).filter(Boolean))].slice(0,2);
+
+    docWide.push({
+      section:'biggest', type:'Level label as description',
+      student:'Whole document',
+      issue:`${labelIdx.length} comments describe students using their level as a label (${examples.map(e=>`"${e}"`).join(', ')}…). IB reports prefer describing what the student does.`,
+      fix:`Replace with behaviour descriptions — e.g. "an achieving student" → "a student who consistently demonstrates..." or "a student working at an Achieving level who..."`,
+    });
+    labelIdx.forEach(idx=>skipIdx.add(idx));
+  }
+
+  const remaining = allIssues.filter((_,idx)=>!skipIdx.has(idx));
+  return { docWide, remaining };
+}
+
+/* ═══════════════════════════════════════════════════════════════
    RENDER
 ═══════════════════════════════════════════════════════════════ */
 function h(s){ return escH(s); }
 
-function makeSection(title, icon, count){
-  const el = document.createElement('div');
-  el.className = 'feedback-section';
-  el.innerHTML = `<div class="section-heading">${icon} ${h(title)}<span class="section-count">${count}</span></div>`;
-  return el;
-}
-function emptySection(title, icon, msg){
-  const el = document.createElement('div');
-  el.className = 'feedback-section';
-  el.innerHTML = `<div class="section-heading">${icon} ${h(title)}</div><div class="section-ok">&#10003; ${h(msg)}</div>`;
-  return el;
-}
-function stdTable(issues, colHeaders, rowFn){
-  return `<div class="table-wrap"><table>
-    <thead><tr>${colHeaders.map(c=>`<th>${h(c)}</th>`).join('')}</tr></thead>
-    <tbody>${issues.map(rowFn).join('')}</tbody>
-  </table></div>`;
+/* Table 1 — Things to check (grammar, consistency, names, "our" pattern, etc.) */
+function renderMainTable(issues){
+  const rows = issues.map(i=>{
+    const isDoc = i.student === 'Whole document';
+
+    // "Current issue" cell
+    let current;
+    if(isDoc){
+      current = `<span class="issue-note">${h(i.issue||i.usage||'')}</span>`;
+    } else if(i.exactSent){
+      current  = `<em class="exact-quote">${h(i.exactSent)}</em>`;
+      if(i.issue && i.issue !== i.exactSent){
+        current += `<div class="issue-note">${h(i.issue)}</div>`;
+      }
+    } else {
+      current = h(i.issue||i.usage||'');
+    }
+
+    const fix   = h(i.fix||i.rec||'');
+    const badge = `<span class="type-badge${isDoc?' type-badge--doc':''}">${h(i.type||'')}</span>`;
+
+    return `<tr${isDoc?' class="whole-doc-row"':''}>
+      <td class="td-student">${h(i.student)}</td>
+      <td>${badge}</td>
+      <td class="td-issue">${current}</td>
+      <td class="td-fix">${fix}</td>
+    </tr>`;
+  }).join('');
+
+  return `<div class="feedback-section">
+    <div class="section-heading">Things to check before final submission <span class="section-count">${issues.length}</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Student / Area</th><th>Issue type</th><th>Current issue</th><th>Suggested fix</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
 }
 
-function renderBiggest(issues){
-  if(!issues.length) return emptySection('Biggest fixes needed','&#128276;','No major issues found.');
-  const el = makeSection('Biggest fixes needed','&#128276;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','What to check','Suggested fix'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-issue td-exact">${h(i.issue)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
+/* Table 2 — Tone and wording to soften */
+function renderToneTable(issues){
+  const rows = issues.map(i=>`<tr>
+    <td class="td-student">${h(i.student)}</td>
+    <td><span class="type-badge">${h(i.type||'')}</span></td>
+    <td class="td-issue"><em class="exact-quote">${h(i.exactSent||'')}</em></td>
+    <td class="td-fix">${h(i.fix||'')}</td>
+  </tr>`).join('');
+
+  return `<div class="feedback-section">
+    <div class="section-heading">Tone and wording to soften <span class="section-count">${issues.length}</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Student / Area</th><th>Issue type</th><th>Current wording</th><th>Suggested wording</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
 }
-function renderNames(issues){
-  if(!issues.length) return emptySection('Name and pronoun consistency','&#128101;','No name or pronoun issues found.');
-  const el = makeSection('Name and pronoun consistency','&#128101;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','What to check','Suggested fix'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-issue td-exact">${h(i.issue)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
-}
-function renderSpelling(issues){
-  if(!issues.length) return emptySection('Spelling and UK/US consistency','&#128221;','No spelling issues found.');
-  const el = makeSection('Spelling and UK/US consistency','&#128221;',issues.length);
-  el.innerHTML += stdTable(issues,['Word / phrase','Current usage','Recommendation'],
-    i=>`<tr><td class="td-word-cell"><span class="td-word">${h(i.word||'')}</span></td>
-        <td class="td-current">${h(i.usage||'')}</td><td class="td-fix">${h(i.rec||'')}</td></tr>`);
-  return el;
-}
-function renderGrammar(issues){
-  if(!issues.length) return emptySection('Grammar, punctuation and spacing','&#9998;','No grammar or punctuation issues found.');
-  const el = makeSection('Grammar, punctuation and spacing','&#9998;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','Exact sentence from report','Suggested correction'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-issue td-exact">${h(i.exactSent)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
-}
-function renderTone(issues){
-  if(!issues.length) return emptySection('Tone comments to soften','&#128172;','No sensitive tone issues found.');
-  const el = makeSection('Tone comments to soften','&#128172;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','Current wording','Suggested wording'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-exact td-current">${h(i.exactSent)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
-}
-function renderFirstPerson(issues){
-  if(!issues.length) return null;
-  const el = makeSection('First-person wording (we / our)','&#9997;&#65039;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','Current wording','Suggested wording'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-exact td-current">${h(i.exactSent)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
-}
-function renderWordy(issues){
-  if(!issues.length) return emptySection('Wordiness / parent-friendly clarity','&#128196;','No wordiness issues found.');
-  const el = makeSection('Wordiness / parent-friendly clarity','&#128196;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','Current wording','Suggested wording'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-exact td-current">${h(i.exactSent)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
-}
-function renderDuplication(issues){
-  if(!issues.length) return emptySection('Duplication or contradiction','&#128260;','No duplication found.');
-  const el = makeSection('Duplication or contradiction','&#128260;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Issue type','What to check','Suggested fix'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.type)}</span></td>
-        <td class="td-issue td-exact">${h(i.exactSent)}</td><td class="td-fix">${h(i.fix)}</td></tr>`);
-  return el;
-}
-function renderLevel(issues){
-  if(!issues.length) return null;
-  const el = makeSection('Comments that may not match their level','&#127919;',issues.length);
-  el.innerHTML += stdTable(issues,['Student / Area','Level','Comment concern','Possible action'],
-    i=>`<tr><td class="td-student">${h(i.student)}</td><td><span class="type-badge">${h(i.level)}</span></td>
-        <td class="td-concern">${h(i.concern)}</td><td class="td-fix">${h(i.action)}</td></tr>`);
-  return el;
+
+/* Table 3 — Comment and level alignment */
+function renderLevelTable(issues){
+  const rows = issues.map(i=>`<tr>
+    <td class="td-student">${h(i.student)}</td>
+    <td><span class="type-badge">${h(i.level||'')}</span></td>
+    <td class="td-concern">${h(i.concern||'')}</td>
+    <td class="td-fix">${h(i.action||'')}</td>
+  </tr>`).join('');
+
+  return `<div class="feedback-section">
+    <div class="section-heading">Comment and level alignment <span class="section-count">${issues.length}</span></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>Student / Area</th><th>Visible level</th><th>Why to check</th><th>Possible action</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>
+  </div>`;
 }
 
 function buildPriority(allIssues){
   const items = [];
   const wrongNames = allIssues.filter(i=>i.type==='Wrong name');
-  if(wrongNames.length) items.push(`Fix ${wrongNames.length} possible wrong-name issue${wrongNames.length>1?'s':''}.`);
+  if(wrongNames.length) items.push(`Check ${wrongNames.length} possible wrong-name issue${wrongNames.length>1?'s':''} — see student rows above.`);
   const pronouns = allIssues.filter(i=>i.type==='Pronoun inconsistency');
-  if(pronouns.length) items.push(`Fix pronoun inconsistency in ${pronouns.map(i=>i.student).join(', ')}.`);
+  if(pronouns.length) items.push(`Fix pronoun inconsistency in: ${pronouns.map(i=>i.student).join(', ')}.`);
   const typos = allIssues.filter(i=>i.section==='spelling'&&i.type==='Spelling error');
-  if(typos.length) items.push(`Correct ${typos.length} spelling error${typos.length>1?'s':''}: ${typos.slice(0,3).map(i=>i.word).join(', ')}${typos.length>3?'…':''}.`);
-  const consist = allIssues.filter(i=>i.section==='spelling'&&!i.type);
-  if(consist.length) items.push(`Resolve UK/US spelling inconsistency (${consist.slice(0,2).map(i=>i.word).join(', ')}).`);
+  if(typos.length) items.push(`Correct ${typos.length} spelling error${typos.length>1?'s':''}.`);
   const fp = allIssues.filter(i=>i.section==='firstperson');
-  if(fp.length) items.push(`Remove first-person wording ("our", "we") — found in ${fp.length} comment${fp.length>1?'s':''}.`);
+  if(fp.length) items.push(`Remove first-person "our"/"we" wording — found in ${fp.length} comment${fp.length>1?'s':''}.`);
   const tone = allIssues.filter(i=>i.section==='tone');
-  if(tone.length) items.push(`Soften sensitive wording in ${tone.length} comment${tone.length>1?'s':''}. See "Tone" section.`);
+  if(tone.length) items.push(`Soften wording in ${tone.length} tone item${tone.length>1?'s':''}. See tone table.`);
   const gram = allIssues.filter(i=>i.section==='grammar');
-  if(gram.length) items.push(`Fix ${gram.length} grammar or punctuation issue${gram.length>1?'s':''}.`);
-  const dup = allIssues.filter(i=>i.section==='duplication');
-  if(dup.length) items.push(`Fix ${dup.length} duplication item${dup.length>1?'s':''}.`);
+  if(gram.length) items.push(`Fix ${gram.length} grammar/punctuation issue${gram.length>1?'s':''}.`);
   const lev = allIssues.filter(i=>i.section==='level');
   if(lev.length) items.push(`Review comment/level alignment for ${lev.map(i=>i.student).join(', ')}.`);
   return items;
@@ -1081,14 +1085,14 @@ function renderPriority(items){
   const tbl = document.getElementById('priorityTable');
   if(!items.length){ box.hidden=true; return; }
   tbl.innerHTML = items.map((it,i)=>
-    `<tr><td class="priority-num">Priority ${i+1}</td><td class="priority-action">${h(it)}</td></tr>`).join('');
+    `<tr><td class="priority-num">Action ${i+1}</td><td class="priority-action">${h(it)}</td></tr>`).join('');
   box.hidden = false;
 }
 
 function renderResults(allIssues, warnings, fileName, className){
   const title = className
-    ? `${className} Report Card Feedback`
-    : (fileName ? `${fileName.replace(/\.[^.]+$/,'')} Report Card Feedback` : 'Report Card Feedback');
+    ? `${className} — Report Card Feedback`
+    : (fileName ? `${fileName.replace(/\.[^.]+$/,'')} — Report Card Feedback` : 'Report Card Feedback');
   document.getElementById('resultsTitle').textContent = title;
 
   const warnBox  = document.getElementById('extractionWarning');
@@ -1098,38 +1102,38 @@ function renderResults(allIssues, warnings, fileName, className){
     warnBox.hidden = false;
   } else { warnBox.hidden = true; }
 
-  const total     = allIssues.length;
-  const bigCount  = allIssues.filter(i=>i.section==='biggest').length;
-  const nameCount = allIssues.filter(i=>i.section==='names').length;
-  const spellCount= allIssues.filter(i=>i.section==='spelling').length;
-  const gramCount = allIssues.filter(i=>i.section==='grammar').length;
-  const toneCount = allIssues.filter(i=>i.section==='tone').length;
+  // Consolidate repeated patterns into "Whole document" rows
+  const { docWide, remaining } = consolidateIssues(allIssues);
+
+  // Table 1: main issues (doc-wide first, then student-specific)
+  const mainIssues = [
+    ...docWide,
+    ...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section)),
+  ];
+
+  // Table 2: tone
+  const toneIssues = remaining.filter(i=>i.section==='tone');
+
+  // Table 3: level alignment
+  const levelIssues = remaining.filter(i=>i.section==='level');
+
+  const total = mainIssues.length + toneIssues.length + levelIssues.length;
 
   document.getElementById('summaryBar').innerHTML = `
     <div class="summary-pill ${total>10?'red':total>3?'amber':'green'}">
       <span class="pill-count">${total}</span> items to review
     </div>
-    ${bigCount  ?`<div class="summary-pill red">  <span class="pill-count">${bigCount}</span>   biggest fixes</div>`:''}
-    ${nameCount ?`<div class="summary-pill red">  <span class="pill-count">${nameCount}</span>   name/pronoun</div>`:''}
-    ${spellCount?`<div class="summary-pill amber"><span class="pill-count">${spellCount}</span>  spelling</div>`:''}
-    ${gramCount ?`<div class="summary-pill amber"><span class="pill-count">${gramCount}</span>   grammar</div>`:''}
-    ${toneCount ?`<div class="summary-pill amber"><span class="pill-count">${toneCount}</span>   tone</div>`:''}
-    ${total===0 ?`<div class="summary-pill green"><span class="pill-count">&#10003;</span> No issues found</div>`:''}
+    ${mainIssues.length?`<div class="summary-pill amber"><span class="pill-count">${mainIssues.length}</span> grammar &amp; consistency</div>`:''}
+    ${toneIssues.length?`<div class="summary-pill amber"><span class="pill-count">${toneIssues.length}</span> tone items</div>`:''}
+    ${levelIssues.length?`<div class="summary-pill amber"><span class="pill-count">${levelIssues.length}</span> level alignment</div>`:''}
+    ${total===0?`<div class="summary-pill green"><span class="pill-count">&#10003;</span> No issues found</div>`:''}
   `;
 
   const body = document.getElementById('feedbackBody');
   body.innerHTML = '';
-  body.appendChild(renderBiggest(allIssues.filter(i=>i.section==='biggest')));
-  body.appendChild(renderNames(allIssues.filter(i=>i.section==='names')));
-  body.appendChild(renderSpelling(allIssues.filter(i=>i.section==='spelling')));
-  body.appendChild(renderGrammar(allIssues.filter(i=>i.section==='grammar')));
-  body.appendChild(renderTone(allIssues.filter(i=>i.section==='tone')));
-  const fpEl = renderFirstPerson(allIssues.filter(i=>i.section==='firstperson'));
-  if(fpEl) body.appendChild(fpEl);
-  body.appendChild(renderWordy(allIssues.filter(i=>i.section==='wordy')));
-  body.appendChild(renderDuplication(allIssues.filter(i=>i.section==='duplication')));
-  const lvlEl = renderLevel(allIssues.filter(i=>i.section==='level'));
-  if(lvlEl) body.appendChild(lvlEl);
+  if(mainIssues.length)  body.innerHTML += renderMainTable(mainIssues);
+  if(toneIssues.length)  body.innerHTML += renderToneTable(toneIssues);
+  if(levelIssues.length) body.innerHTML += renderLevelTable(levelIssues);
 
   renderPriority(buildPriority(allIssues));
   document.getElementById('resultsSection').hidden = false;
@@ -1144,41 +1148,88 @@ function dlBlob(blob,name){
   Object.assign(document.createElement('a'),{href:url,download:name}).click();
   setTimeout(()=>URL.revokeObjectURL(url),3000);
 }
+
 function flatForExport(allIssues){
-  return allIssues.map(i=>({
-    section:i.section, type:i.type||'',
-    student:i.student||'Whole document',
-    check:i.issue||i.concern||i.usage||'',
-    fix:i.fix||i.rec||i.action||'',
+  const { docWide, remaining } = consolidateIssues(allIssues);
+  const all = [
+    ...docWide,
+    ...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section)),
+    ...remaining.filter(i=>i.section==='tone'),
+    ...remaining.filter(i=>i.section==='level'),
+  ];
+  return all.map(i=>({
+    student: i.student||'Whole document',
+    type:    i.type||'',
+    current: i.exactSent||i.issue||i.usage||i.concern||'',
+    fix:     i.fix||i.rec||i.action||'',
+    section: i.section||'',
   }));
 }
+
 function downloadCsv(allIssues,titleStr){
-  const flat=flatForExport(allIssues);
-  const csv=[['Section','Issue type','Student / Area','What to check','Suggested fix'],
-    ...flat.map(r=>[r.section,r.type,r.student,r.check,r.fix])]
+  const flat = flatForExport(allIssues);
+  const csv  = [['Student / Area','Issue type','Current issue','Suggested fix'],
+    ...flat.map(r=>[r.student,r.type,r.current,r.fix])]
     .map(row=>row.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
   dlBlob(new Blob([csv],{type:'text/csv;charset=utf-8'}),titleStr.replace(/\s+/g,'_')+'_feedback.csv');
 }
+
 function downloadHtml(allIssues,titleStr,subtitle){
-  const flat=flatForExport(allIssues);
-  const rows=flat.map(r=>`<tr><td>${h(r.section)}</td><td>${h(r.type)}</td>
-    <td><strong>${h(r.student)}</strong></td><td>${h(r.check)}</td>
-    <td style="color:#166534">${h(r.fix)}</td></tr>`).join('');
-  const html=`<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${h(titleStr)}</title>
-<style>body{font-family:Arial,sans-serif;margin:40px;font-size:13px}h1{color:#1a3a5c}
-table{width:100%;border-collapse:collapse}thead th{background:#1a3a5c;color:#fff;padding:8px 12px;text-align:left;font-size:11px}
-tbody td{padding:8px 12px;border-bottom:1px solid #f0f4f8;vertical-align:top;line-height:1.5}</style>
-</head><body><h1>${h(titleStr)}</h1><p style="color:#6b7280">${h(subtitle)}</p>
-<table><thead><tr><th>Section</th><th>Issue type</th><th>Student / Area</th><th>What to check</th><th>Suggested fix</th></tr></thead>
-<tbody>${rows}</tbody></table>
-<p style="color:#6b7280;font-style:italic;font-size:12px;margin-top:20px">The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.</p>
+  const { docWide, remaining } = consolidateIssues(allIssues);
+  const mainIssues  = [...docWide,...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section))];
+  const toneIssues  = remaining.filter(i=>i.section==='tone');
+  const levelIssues = remaining.filter(i=>i.section==='level');
+
+  function tableHtml(title,headers,rows){
+    if(!rows.length) return '';
+    const head = headers.map(c=>`<th>${c}</th>`).join('');
+    const body = rows.join('');
+    return `<h2 style="color:#1a3a5c;font-size:14px;margin:20px 0 6px">${title}</h2>
+<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  const mainRows = mainIssues.map(i=>{
+    const isDoc = i.student==='Whole document';
+    const current = i.exactSent ? `<em>${h(i.exactSent)}</em>${i.issue&&i.issue!==i.exactSent?`<br><small>${h(i.issue)}</small>`:''}` : h(i.issue||i.usage||'');
+    return `<tr${isDoc?' style="background:#eff6ff"':''}>
+      <td><strong>${h(i.student)}</strong></td><td>${h(i.type||'')}</td>
+      <td>${current}</td><td style="color:#166534">${h(i.fix||i.rec||'')}</td></tr>`;
+  });
+  const toneRows = toneIssues.map(i=>`<tr>
+    <td><strong>${h(i.student)}</strong></td><td>${h(i.type||'')}</td>
+    <td><em>${h(i.exactSent||'')}</em></td><td style="color:#166534">${h(i.fix||'')}</td></tr>`);
+  const levelRows = levelIssues.map(i=>`<tr>
+    <td><strong>${h(i.student)}</strong></td><td>${h(i.level||'')}</td>
+    <td>${h(i.concern||'')}</td><td style="color:#166534">${h(i.action||'')}</td></tr>`);
+
+  const html = `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>${h(titleStr)}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:40px;font-size:13px;color:#1a2332}
+h1{color:#1a3a5c;font-size:18px;margin-bottom:4px}
+p.sub{color:#6b7280;font-size:12px;margin-bottom:20px}
+table{width:100%;border-collapse:collapse;margin-bottom:8px}
+thead th{background:#1a3a5c;color:#fff;padding:7px 10px;text-align:left;font-size:11px}
+tbody td{padding:7px 10px;border-bottom:1px solid #f0f4f8;vertical-align:top;line-height:1.5}
+em{font-style:italic;color:#374151}
+small{font-size:11px;color:#6b7280}
+</style></head><body>
+<h1>${h(titleStr)}</h1><p class="sub">${h(subtitle)}</p>
+${tableHtml('Things to check before final submission',['Student / Area','Issue type','Current issue','Suggested fix'],mainRows)}
+${tableHtml('Tone and wording to soften',['Student / Area','Issue type','Current wording','Suggested wording'],toneRows)}
+${tableHtml('Comment and level alignment',['Student / Area','Visible level','Why to check','Possible action'],levelRows)}
+<p style="color:#6b7280;font-style:italic;font-size:12px;margin-top:20px">The reports are mostly polished and professional. The items above are mainly consistency, tone, and editing checks before final submission.</p>
 </body></html>`;
   dlBlob(new Blob([html],{type:'text/html;charset=utf-8'}),titleStr.replace(/\s+/g,'_')+'_feedback.html');
 }
+
 function downloadPdf(allIssues,titleStr,subtitle){
   const {jsPDF}=window.jspdf;
   const doc=new jsPDF({orientation:'landscape',unit:'mm',format:'a4'});
-  const flat=flatForExport(allIssues);
+  const { docWide, remaining } = consolidateIssues(allIssues);
+  const mainIssues  = [...docWide,...remaining.filter(i=>['biggest','names','grammar','spelling','firstperson','wordy','duplication'].includes(i.section))];
+  const toneIssues  = remaining.filter(i=>i.section==='tone');
+  const levelIssues = remaining.filter(i=>i.section==='level');
+
   doc.setFontSize(16); doc.setTextColor(26,58,92);
   doc.text(titleStr,14,15);
   doc.setFontSize(8); doc.setTextColor(80,80,80);
@@ -1186,19 +1237,77 @@ function downloadPdf(allIssues,titleStr,subtitle){
   doc.text(sub,14,22);
   doc.setFontSize(7); doc.setTextColor(130,130,130);
   doc.text(`Generated: ${new Date().toLocaleDateString('en-GB')}`,14,22+sub.length*4+2);
-  doc.autoTable({
-    startY:22+sub.length*4+8,
-    head:[['Section','Issue type','Student / Area','What to check','Suggested fix']],
-    body:flat.map(r=>[r.section,r.type,r.student,r.check,r.fix]),
-    theme:'striped',
-    headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
-    bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
-    columnStyles:{0:{cellWidth:22},1:{cellWidth:26},2:{cellWidth:34},3:{cellWidth:80},4:{cellWidth:70,textColor:[22,101,52]}},
-    alternateRowStyles:{fillColor:[248,250,255]},
-  });
-  doc.setFontSize(7); doc.setTextColor(100,100,100);
-  doc.text('The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.',14,doc.lastAutoTable.finalY+7);
-  doc.save(titleStr.replace(/\s+/g,'_')+'_feedback.pdf');
+
+  let startY = 22+sub.length*4+8;
+
+  if(mainIssues.length){
+    doc.setFontSize(8); doc.setTextColor(26,58,92); doc.setFont(undefined,'bold');
+    doc.text('Things to check before final submission',14,startY-2);
+    doc.setFont(undefined,'normal');
+    doc.autoTable({
+      startY,
+      head:[['Student / Area','Issue type','Current issue','Suggested fix']],
+      body:mainIssues.map(i=>[
+        i.student||'',
+        i.type||'',
+        i.exactSent ? `"${i.exactSent}"${i.issue&&i.issue!==i.exactSent?' — '+i.issue:''}` : (i.issue||i.usage||''),
+        i.fix||i.rec||'',
+      ]),
+      theme:'striped',
+      headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
+      bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
+      columnStyles:{0:{cellWidth:38},1:{cellWidth:30},2:{cellWidth:100},3:{cellWidth:90,textColor:[22,101,52]}},
+      alternateRowStyles:{fillColor:[248,250,255]},
+      didParseCell:(data)=>{
+        if(data.section==='body' && data.row.raw[0]==='Whole document'){
+          data.cell.styles.fillColor=[239,246,255];
+        }
+      },
+    });
+    startY = doc.lastAutoTable.finalY + 8;
+  }
+
+  if(toneIssues.length){
+    if(startY > 170){ doc.addPage(); startY = 14; }
+    doc.setFontSize(8); doc.setTextColor(26,58,92); doc.setFont(undefined,'bold');
+    doc.text('Tone and wording to soften',14,startY-2);
+    doc.setFont(undefined,'normal');
+    doc.autoTable({
+      startY,
+      head:[['Student / Area','Issue type','Current wording','Suggested wording']],
+      body:toneIssues.map(i=>[i.student||'',i.type||'',i.exactSent||'',i.fix||'']),
+      theme:'striped',
+      headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
+      bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
+      columnStyles:{0:{cellWidth:38},1:{cellWidth:30},2:{cellWidth:100},3:{cellWidth:90,textColor:[22,101,52]}},
+      alternateRowStyles:{fillColor:[248,250,255]},
+    });
+    startY = doc.lastAutoTable.finalY + 8;
+  }
+
+  if(levelIssues.length){
+    if(startY > 170){ doc.addPage(); startY = 14; }
+    doc.setFontSize(8); doc.setTextColor(26,58,92); doc.setFont(undefined,'bold');
+    doc.text('Comment and level alignment',14,startY-2);
+    doc.setFont(undefined,'normal');
+    doc.autoTable({
+      startY,
+      head:[['Student / Area','Visible level','Why to check','Possible action']],
+      body:levelIssues.map(i=>[i.student||'',i.level||'',i.concern||'',i.action||'']),
+      theme:'striped',
+      headStyles:{fillColor:[26,58,92],fontSize:7,fontStyle:'bold',cellPadding:3},
+      bodyStyles:{fontSize:6.5,cellPadding:3,valign:'top'},
+      columnStyles:{0:{cellWidth:38},1:{cellWidth:22},2:{cellWidth:108},3:{cellWidth:90,textColor:[22,101,52]}},
+      alternateRowStyles:{fillColor:[248,250,255]},
+    });
+    startY = doc.lastAutoTable.finalY + 6;
+  }
+
+  if(startY < 175){
+    doc.setFontSize(7); doc.setTextColor(100,100,100);
+    doc.text('The reports are mostly polished and professional. The items above are mainly consistency, tone, and editing checks before final submission.',14,startY);
+  }
+  doc.save(titleStr.replace(/[\s—]+/g,'_')+'_feedback.pdf');
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1231,20 +1340,16 @@ async function processFile(file){
       segments = result.segments;
       roster   = result.roster;
       fullText = segments.map(s=>s.text).join('\n\n');
-
     } else {
-      // PDF: try column-aware table extraction first
       const rawItems = await readPdfRaw(file);
       const colInfo  = detectTableColumns(rawItems);
 
       if(colInfo && colInfo.subjects.length >= 3){
-        // Table-format PDF (landscape report card grid)
         const result = extractPdfTableSegments(rawItems, colInfo, manualRoster);
         segments = result.segments;
         roster   = result.roster;
         fullText = segments.map(s=>s.text).join('\n\n');
       } else {
-        // Linear PDF — fall back to Y-position grouping
         fullText = reconstructLinearText(rawItems);
         const q  = checkPdfQuality(fullText);
         if(q==='empty'){
@@ -1252,7 +1357,7 @@ async function processFile(file){
           return;
         }
         if(q==='garbled'){
-          alert('This PDF could not be read clearly.\n\nThe text extraction looks garbled — this can happen with complex table layouts. Please upload the .docx version for accurate results.');
+          alert('This PDF could not be read clearly — complex table layouts can cause extraction issues.\n\nPlease upload the .docx version for accurate results.');
           return;
         }
         const result = parsePlainText(fullText, manualRoster);
@@ -1304,7 +1409,7 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   function setFile(f){
     chosenFile=f;
-    fileNameEl.textContent=f?`Selected: ${f.name}`:'Accepts .pdf and .docx · For .doc files, save as .docx first';
+    fileNameEl.textContent=f?`Selected: ${f.name}`:'Accepts .pdf and .docx · For .doc files, save as .docx first';
     checkBtn.disabled=!f;
   }
 
