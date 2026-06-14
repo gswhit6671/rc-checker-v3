@@ -1421,11 +1421,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   });
 
   fileInput.addEventListener('change',()=>setFile(fileInput.files[0]||null));
-  dropZone.addEventListener('click',e=>{
-    // Skip if the click was on the label or input — they handle themselves natively
-    if(e.target.closest('label')||e.target===fileInput) return;
-    fileInput.click();
-  });
   dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('drag-over');});
   dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('drag-over'));
   dropZone.addEventListener('drop',e=>{

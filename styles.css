@@ -91,6 +91,26 @@ body {
   margin-bottom: 20px;
   transition: border-color .2s, background .2s;
   cursor: pointer;
+  position: relative;
+}
+
+/* Invisible file input overlay — covers the whole drop zone so clicking
+   anywhere is a direct user click on the input (no programmatic .click() needed) */
+.drop-zone-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+/* Visual-only label — pointer events handled by the overlay input above */
+.choose-label {
+  pointer-events: none;
+  position: relative;
+  z-index: 1;
 }
 
 .drop-zone.drag-over {
