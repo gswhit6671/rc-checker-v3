@@ -401,14 +401,17 @@ function groupIntoRows(items, yTol=5){
 }
 
 function detectPdfColumns(rows){
-  // Find row with 2+ known subject headings
+  // Find a row containing 2+ known subject headings
+  const SUBJECT_RE = /^(Math|Maths|Mathematics|Language|English|Literacy|UOI|Unit\s+of\s+Inquiry|Learner|Science|Specialist|Learning|Social\s+Studies|PSPE|Drama|Music|Art|PE|Computing|ICT)$/i;
   for(const row of rows){
-    const texts = row.items.map(i=>i.text.trim());
-    const hits  = texts.filter(t => /^(Math|Maths|Mathematics|Language|English|UOI|Unit\s+of|Learner|Science|Specialist|Learning)$/i.test(t));
+    const hits = row.items.filter(i => SUBJECT_RE.test(i.text.trim()));
     if(hits.length >= 2){
-      const xs = row.items.map(i=>i.x).sort((a,b)=>a-b);
+      // Sort hit items by X to build column boundaries
+      const sorted = [...hits].sort((a,b)=>a.x-b.x);
+      // Build midpoint boundaries between consecutive column X positions
+      const allXs = row.items.map(i=>i.x).sort((a,b)=>a-b);
       const boundaries = [0];
-      for(let i=1; i<xs.length; i++) boundaries.push((xs[i-1]+xs[i])/2);
+      for(let i=1; i<allXs.length; i++) boundaries.push((allXs[i-1]+allXs[i])/2);
       const subjects = row.items.map(i=>normaliseArea(i.text));
       return { boundaries, subjects };
     }
@@ -422,69 +425,51 @@ function assignColumn(x, boundaries){
   return c;
 }
 
-async function parsePdfRows(file, manualRoster){
-  const items   = await readPdfItems(file);
-  const rows    = groupIntoRows(items);
-  const colInfo = detectPdfColumns(rows);
+function mergeItemsIntoLines(bucket){
+  const sorted = [...bucket].sort((a,b)=> a.page!==b.page ? a.page-b.page : a.y!==b.y ? a.y-b.y : a.x-b.x);
+  const lines = [];
+  let cur = null;
+  sorted.forEach(item=>{
+    if(!cur || item.page!==cur.page || Math.abs(item.y-cur.y)>5){
+      if(cur) lines.push(cur);
+      cur = { y:item.y, page:item.page, text:item.text };
+    } else {
+      cur.text += (cur.text.endsWith(' ')||item.text.startsWith(' ') ? '' : ' ') + item.text;
+    }
+  });
+  if(cur) lines.push(cur);
+  return lines;
+}
 
-  if(!colInfo || colInfo.subjects.length < 3){
-    // No clear table structure — ask for .docx
-    return { segments: [], roster: new Set(manualRoster||[]), noTable: true };
-  }
-
+function parsePdfByColumns(items, colInfo, manualRoster){
   const { boundaries, subjects } = colInfo;
+  const roster = new Set(manualRoster||[]);
 
-  // Assign each PDF text item to its column
   const colBuckets = subjects.map(()=>[]);
   items.forEach(item=>{
     const c = assignColumn(item.x, boundaries);
     if(c < colBuckets.length) colBuckets[c].push(item);
   });
 
-  // Merge col0 items into lines
-  function mergeItems(bucket){
-    const sorted = [...bucket].sort((a,b)=> a.page!==b.page ? a.page-b.page : a.y!==b.y ? a.y-b.y : a.x-b.x);
-    const lines = [];
-    let cur = null;
-    sorted.forEach(item=>{
-      if(!cur || item.page!==cur.page || Math.abs(item.y-cur.y)>5){
-        if(cur) lines.push(cur);
-        cur = { y:item.y, page:item.page, text:item.text };
-      } else {
-        cur.text += (cur.text.endsWith(' ')||item.text.startsWith(' ') ? '' : ' ') + item.text;
-      }
-    });
-    if(cur) lines.push(cur);
-    return lines;
-  }
+  const nameLines    = mergeItemsIntoLines(colBuckets[0]);
+  const subjectLines = colBuckets.slice(1).map(mergeItemsIntoLines);
 
-  const nameLines    = mergeItems(colBuckets[0]);
-  const subjectLines = colBuckets.slice(1).map(mergeItems);
-
-  // Build student list from col0 — only proper names
-  const roster = new Set(manualRoster||[]);
   const studentEntries = [];
-
   nameLines.forEach(line=>{
     const t = line.text.trim();
-    if(/^(Student|Name|Level|Emerging|Developing|Achieving|Extending|Secure)$/i.test(t)) return;
+    if(/^(Student|Name|Level|Emerging|Developing|Achieving|Extending|Secure|Beginning|Approaching)$/i.test(t)) return;
     if(isLikelyStudentName(t)){
       studentEntries.push({ name:t, y:line.y, page:line.page });
       roster.add(t);
     }
   });
 
-  if(studentEntries.length < 2){
-    return { segments:[], roster, noTable: true };
-  }
+  if(studentEntries.length < 2) return { segments:[], roster };
 
-  // Build segments
   const segments = [];
-
   for(let si = 0; si < studentEntries.length; si++){
     const stu     = studentEntries[si];
     const nextStu = studentEntries[si+1];
-
     for(let ci = 0; ci < subjectLines.length; ci++){
       const area = subjects[ci+1] || 'General';
       const commentLines = subjectLines[ci].filter(line=>{
@@ -496,17 +481,126 @@ async function parsePdfRows(file, manualRoster){
         }
         return true;
       });
-
       const comment = commentLines.map(l=>l.text).join(' ').replace(/\s+/g,' ').trim();
-      if(!comment || comment.length < 20) continue;
-      if(isGarbled(comment)) continue;
-
-      const level = extractLevel(comment);
-      segments.push({ studentName:stu.name, reportArea:area, level, comment, sourceRef:`Page ${stu.page}`, confidence:'high' });
+      if(!comment || comment.length < 20 || isGarbled(comment)) continue;
+      segments.push({ studentName:stu.name, reportArea:area, level:extractLevel(comment), comment, sourceRef:`Page ${stu.page}`, confidence:'high' });
     }
+  }
+  return { segments, roster };
+}
+
+/* Linear fallback: read PDF as flowing text, find names + comments */
+function parsePdfLinear(rows, manualRoster){
+  const roster   = new Set(manualRoster||[]);
+  const segments = [];
+  const LEVEL_RE = /\b(Emerging|Developing|Achieving|Extending|Secure|Beginning|Approaching)\b/;
+  const SUBJECT_RE = /^(Math|Maths|Mathematics|Language|English|Literacy|UOI|Unit\s+of\s+Inquiry|Learner|Student\s+as\s+a\s+Learner|Science|Specialist|Drama|Music|Art|PE|PSPE|Social\s+Studies|Computing|ICT|General)$/i;
+
+  let curStudent = null;
+  let curArea    = 'General';
+  let buf        = [];
+  let curPage    = 1;
+
+  function flush(){
+    const text = buf.join(' ').replace(/\s+/g,' ').trim();
+    buf = [];
+    if(!text || text.length < 30 || !curStudent) return;
+    if(isGarbled(text)) return;
+    const level = (text.match(LEVEL_RE)||[])[1]||null;
+    segments.push({ studentName:curStudent, reportArea:curArea, level, comment:text, sourceRef:`Page ${curPage}`, confidence:'medium' });
+  }
+
+  for(const row of rows){
+    // Build the full text of this row, left to right
+    const lineText = row.items.map(i=>i.text).join(' ').replace(/\s+/g,' ').trim();
+    if(!lineText) continue;
+
+    // Short left-aligned text — candidate for name or subject header
+    const leftX   = row.items[0]?.x || 999;
+    const pageW   = 842; // A4 landscape width in pts (approximate)
+    const isLeft  = leftX < pageW * 0.18; // left 18% of page
+
+    // Level label alone on a line → skip (it's a column header or row label)
+    if(LEVEL_RE.test(lineText) && lineText.split(/\s+/).length <= 2) continue;
+
+    // Subject header
+    if(SUBJECT_RE.test(lineText.trim())){
+      flush();
+      curArea = normaliseArea(lineText.trim());
+      continue;
+    }
+
+    // Student name: short, left-aligned, looks like a name
+    if(isLeft && isLikelyStudentName(lineText)){
+      flush();
+      curStudent = lineText;
+      curArea    = 'General';
+      curPage    = row.page;
+      roster.add(lineText);
+      continue;
+    }
+
+    // Otherwise: comment text
+    if(curStudent) buf.push(lineText);
+  }
+  flush();
+
+  // If we got segments with area 'General', try to split by subject markers in the text
+  if(segments.length > 0 && segments.every(s=>s.reportArea==='General')){
+    return splitGeneralSegmentsByArea(segments, roster);
   }
 
   return { segments, roster };
+}
+
+/* If all segments have area=General, try to split comment text by inline subject markers */
+function splitGeneralSegmentsByArea(segments, roster){
+  const AREA_MARKERS = /\b(Mathematics|Maths|Math|Language Arts|Language|English|Unit of Inquiry|UOI|Learner|Science|Specialist)\b\s*[:\-–]?\s*/gi;
+  const out = [];
+  for(const seg of segments){
+    const { comment } = seg;
+    AREA_MARKERS.lastIndex = 0;
+    const parts = [];
+    let lastIdx = 0; let lastArea = null; let m;
+    while((m = AREA_MARKERS.exec(comment)) !== null){
+      if(lastArea && m.index > lastIdx){
+        parts.push({ area: lastArea, text: comment.slice(lastIdx, m.index).trim() });
+      }
+      lastArea = normaliseArea(m[1]);
+      lastIdx  = AREA_MARKERS.lastIndex;
+    }
+    if(lastArea && lastIdx < comment.length){
+      parts.push({ area: lastArea, text: comment.slice(lastIdx).trim() });
+    }
+    if(parts.length >= 2){
+      parts.forEach(p=>{
+        if(!p.text || p.text.length < 20 || isGarbled(p.text)) return;
+        out.push({ ...seg, reportArea: p.area, comment: p.text, level: extractLevel(p.text) });
+      });
+    } else {
+      out.push(seg);
+    }
+  }
+  return { segments: out, roster };
+}
+
+async function parsePdfRows(file, manualRoster){
+  const items = await readPdfItems(file);
+  const rows  = groupIntoRows(items);
+
+  // Try column-based extraction first
+  const colInfo = detectPdfColumns(rows);
+  if(colInfo && colInfo.subjects.length >= 2){
+    const result = parsePdfByColumns(items, colInfo, manualRoster);
+    if(result.segments.length >= 2) return result;
+  }
+
+  // Linear fallback — works for document-style PDFs
+  const linear = parsePdfLinear(rows, manualRoster);
+  if(linear.segments.length >= 1) return linear;
+
+  // Nothing found
+  return { segments:[], roster: new Set(manualRoster||[]), noTable: true };
 }
 
 /* ═══════════════════════════════════════════════════════════
