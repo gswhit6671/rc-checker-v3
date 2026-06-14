@@ -136,7 +136,7 @@
       <div class="results-header">
         <div class="results-title-block">
           <h2 id="resultsTitle">Report Card Feedback</h2>
-          <p class="results-subtitle">Only comments that need attention are included. Main report card comments were checked for name/pronoun consistency, spelling consistency, professional report-card tone, first-person wording/contractions, grammar, punctuation, spacing, duplication, and comment/level alignment.</p>
+          <p class="results-subtitle">Table of items to review before final submission</p>
         </div>
         <div class="download-row">
           <button class="btn-primary" id="dlPdf">&#11015;&nbsp; PDF</button>
@@ -160,11 +160,16 @@
       <!-- Priority checklist -->
       <div class="priority-box" id="priorityBox" hidden>
         <h3 class="priority-title">&#9989;&nbsp; Priority checklist before submission</h3>
-        <ol id="priorityList"></ol>
+        <div class="table-wrap">
+          <table class="priority-table">
+            <thead><tr><th>Priority</th><th>Action</th></tr></thead>
+            <tbody id="priorityTable"></tbody>
+          </table>
+        </div>
       </div>
 
       <!-- Footer note -->
-      <p class="results-footer">Overall: The reports above show items to review before submission. Each suggestion is based on what is clearly present in the document — not a guess.</p>
+      <p class="results-footer">Overall: The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.</p>
 
       <div class="download-row download-row--bottom">
         <button class="btn-primary" id="dlPdf2">&#11015;&nbsp; Download PDF feedback</button>
