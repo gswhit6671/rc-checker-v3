@@ -7,36 +7,33 @@
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-
 <div class="page">
 
-  <!-- HEADER -->
   <header class="site-header">
     <div class="header-inner">
       <div class="header-logo">
         <span class="logo-icon">&#10003;</span>
         <span class="logo-text">Report Card Checker</span>
       </div>
-      <p class="header-sub">Professional proofreading for whole-class report sets — runs entirely in your browser</p>
+      <p class="header-sub">Whole-class proofreading — runs entirely in your browser &nbsp;·&nbsp; Nothing is uploaded</p>
     </div>
   </header>
 
-  <!-- UPLOAD CARD -->
   <main class="main-content">
 
-    <section class="card upload-card">
+    <!-- ── STEP 1: UPLOAD ── -->
+    <section class="card upload-card" id="uploadCard">
       <h2 class="card-title">Upload your class report file</h2>
-      <p class="card-desc">Upload a whole-class report card document. The checker will find name/pronoun issues, spelling consistency, grammar, punctuation, tone, and clarity — and produce feedback in the same style as a human proofreader.</p>
+      <p class="card-desc">Upload a whole-class report card file (.pdf or .docx). The checker reads every student comment and flags only the items that genuinely need attention.</p>
 
       <div class="drop-zone" id="dropZone">
         <div class="drop-icon">&#128196;</div>
         <p class="drop-main"><strong>Drag and drop your file here</strong>, or</p>
-        <label class="btn-primary" for="fileInput">Choose file</label>
-        <input type="file" id="fileInput" accept=".pdf,.docx,.doc" hidden />
-        <p class="drop-hint" id="fileName">Accepts .pdf and .docx &nbsp;·&nbsp; For .doc files, save as .docx in Word first</p>
+        <span class="btn-primary choose-label">Choose file</span>
+        <input type="file" id="fileInput" accept=".pdf,.docx,.doc" class="drop-zone-input" />
+        <p class="drop-hint" id="fileNameLabel">Accepts .pdf and .docx &nbsp;·&nbsp; For .doc files, save as .docx in Word first</p>
       </div>
 
-      <!-- SETTINGS -->
       <div class="settings-row">
         <button class="settings-toggle" id="settingsToggle" aria-expanded="false">
           <span>&#9881;&#65039; Settings</span>
@@ -46,97 +43,129 @@
 
       <div class="settings-panel" id="settingsPanel" hidden>
         <div class="settings-grid">
-
           <div class="setting-block">
             <div class="setting-title">Spelling style</div>
-            <label class="radio-row">
-              <input type="radio" name="spelling" value="auto" checked />
-              <span>Auto-detect consistency <span class="hint-text">(checks whether the document mixes UK and US spelling)</span></span>
-            </label>
-            <label class="radio-row">
-              <input type="radio" name="spelling" value="uk" />
-              <span>Prefer UK English <span class="hint-text">(flags American spellings as inconsistent)</span></span>
-            </label>
-            <label class="radio-row">
-              <input type="radio" name="spelling" value="us" />
-              <span>Prefer US English <span class="hint-text">(flags British spellings as inconsistent)</span></span>
-            </label>
+            <label class="radio-row"><input type="radio" name="spelling" value="auto" checked />
+              <span>Auto-detect consistency <span class="hint-text">(flags mixed UK/US)</span></span></label>
+            <label class="radio-row"><input type="radio" name="spelling" value="uk" />
+              <span>Prefer UK English</span></label>
+            <label class="radio-row"><input type="radio" name="spelling" value="us" />
+              <span>Prefer US English</span></label>
           </div>
-
           <div class="setting-block">
             <div class="setting-title">Additional checks</div>
-            <label class="check-row">
-              <input type="checkbox" id="chkFirstPerson" checked />
-              Flag first-person wording (we, our, I)
-            </label>
-            <label class="check-row">
-              <input type="checkbox" id="chkLevel" checked />
-              Check comment and level alignment (only if levels are visible in the file)
-            </label>
+            <label class="check-row"><input type="checkbox" id="chkFirstPerson" checked />
+              Flag first-person wording (we, our, I, contractions)</label>
+            <label class="check-row"><input type="checkbox" id="chkLevel" checked />
+              Check comment / level alignment (when level is visible)</label>
           </div>
-
           <div class="setting-block setting-block--wide">
-            <div class="setting-title">Class name <span class="hint-text">(optional — used in the feedback title)</span></div>
-            <input type="text" id="classNameInput" class="text-input" placeholder="e.g. Y4GM or 5A or Ms Johnson's class" />
+            <div class="setting-title">Class name <span class="hint-text">(optional)</span></div>
+            <input type="text" id="classNameInput" class="text-input" placeholder="e.g. Y4GM or 5A" />
           </div>
-
           <div class="setting-block setting-block--wide">
-            <div class="setting-title">Class list <span class="hint-text">(optional — paste one name per line to improve name detection)</span></div>
+            <div class="setting-title">Class list <span class="hint-text">(optional — one name per line; enables wrong-name detection)</span></div>
             <textarea id="classListInput" class="textarea-input" rows="4"
-              placeholder="Ava Chen&#10;Sam Johansson&#10;Paujai Smith&#10;Keon Williams"></textarea>
+              placeholder="Ava Chen&#10;Sam Johansson&#10;Amirynn&#10;Keon Williams"></textarea>
           </div>
-
         </div>
       </div>
 
-      <button class="btn-primary btn-check" id="checkBtn" disabled>
-        &#128270;&nbsp; Check Report Cards
+      <button class="btn-primary btn-parse" id="parseBtn" disabled>
+        &#128269;&nbsp; Read &amp; Preview File
       </button>
 
-      <div class="spinner" id="spinner" hidden>
-        <div class="spin-ring"></div>
-        <p>Reading file and checking comments&hellip;</p>
+      <div class="progress-wrap" id="progressWrap" hidden>
+        <div class="progress-bar-track"><div class="progress-bar-fill" id="progressFill"></div></div>
+        <p class="progress-label" id="progressLabel">Reading file…</p>
       </div>
-
     </section>
 
-    <!-- HOW IT WORKS -->
-    <section class="how-it-works">
+    <!-- ── HOW IT WORKS ── -->
+    <section class="how-it-works" id="howCards">
       <div class="how-card">
         <div class="how-icon">&#128203;</div>
         <h3>What it checks</h3>
         <ul class="how-list">
-          <li>Wrong student name (roster-based only)</li>
-          <li>Pronoun inconsistency within a comment</li>
-          <li>Spelling errors and UK/US consistency</li>
-          <li>Grammar: missing articles, agreement</li>
-          <li>Punctuation, spacing and hyphens</li>
-          <li>Sensitive or negative tone</li>
-          <li>First-person wording (we/our/I)</li>
-          <li>Wordiness and unclear language</li>
-          <li>Duplication and contradiction</li>
-          <li>Comment/level alignment</li>
+          <li>Wrong student name in a comment</li>
+          <li>Pronoun inconsistency (he/she mix)</li>
+          <li>Spelling typos and UK/US consistency</li>
+          <li>Grammar, punctuation &amp; spacing</li>
+          <li>Negative or sensitive tone</li>
+          <li>Wordy or informal wording</li>
+          <li>First-person language (our, we, I)</li>
+          <li>Duplicate words (and and / the the)</li>
+          <li>Comment / level alignment</li>
         </ul>
       </div>
       <div class="how-card">
         <div class="how-icon">&#9997;&#65039;</div>
         <h3>Style of feedback</h3>
-        <p>Feedback matches a professional human proofreader's style — simple tables with the exact issue, why it matters, and a clear suggested fix. No AI rewrites. No IB language suggestions. No confusing columns.</p>
+        <p>Only comments that need attention are shown. Each row is specific to one student and report area, with a plain-English fix. Garbled or unclear text is skipped rather than guessed at.</p>
       </div>
       <div class="how-card">
         <div class="how-icon">&#128274;</div>
         <h3>Private by design</h3>
-        <p>Everything runs in your browser. Your file is never uploaded to any server. No student data ever leaves your device.</p>
+        <p>Everything runs in your browser. Your file is never sent to a server. No student data leaves your device.</p>
+      </div>
+      <div class="how-card">
+        <div class="how-icon">&#9999;&#65039;</div>
+        <h3>Grammar, spelling &amp; punctuation</h3>
+        <ul class="how-list">
+          <li>Common spelling typos (e.g. <em>recieve</em> &rarr; <em>receive</em>)</li>
+          <li>UK vs US spelling mixed in the same document</li>
+          <li>Missing space after a full stop</li>
+          <li>Double spaces or space before punctuation</li>
+          <li>Duplicate words (<em>and and</em>, <em>the the</em>)</li>
+          <li>Contractions in reports (<em>don&rsquo;t</em> &rarr; <em>do not</em>)</li>
+          <li>Repeated transition words (<em>Furthermore&hellip; Furthermore</em>)</li>
+          <li>Possible contradictions in the same comment</li>
+        </ul>
       </div>
     </section>
 
-    <!-- RESULTS SECTION -->
+    <!-- ── STEP 2: PREVIEW ── -->
+    <section id="previewSection" hidden>
+      <div class="preview-header">
+        <div>
+          <h2 class="preview-title">Parsed report table</h2>
+          <p class="preview-sub">Check that the rows below look correct, then click <strong>Check these comments</strong>.</p>
+        </div>
+        <button class="btn-primary btn-check-all" id="checkBtn">&#10003;&nbsp; Check these comments</button>
+      </div>
+
+      <div class="preview-skip-note" id="skipNote" hidden>
+        <strong>&#9888;</strong> Some sections were skipped because the student name or report area could not be read clearly. Only clearly identified rows are checked.
+      </div>
+
+      <div class="table-wrap">
+        <table id="previewTable">
+          <thead>
+            <tr>
+              <th>Student name</th>
+              <th>Report area</th>
+              <th>Level</th>
+              <th>Comment (preview)</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="previewBody"></tbody>
+        </table>
+      </div>
+
+      <div class="check-progress-wrap" id="checkProgressWrap" hidden>
+        <div class="progress-bar-track"><div class="progress-bar-fill" id="checkProgressFill"></div></div>
+        <p class="progress-label" id="checkProgressLabel">Checking comments…</p>
+      </div>
+    </section>
+
+    <!-- ── STEP 3: RESULTS ── -->
     <section id="resultsSection" hidden>
 
       <div class="results-header">
         <div class="results-title-block">
           <h2 id="resultsTitle">Report Card Feedback</h2>
-          <p class="results-subtitle">Table of items to review before final submission</p>
+          <p class="results-subtitle">Only comments that need attention are included.</p>
         </div>
         <div class="download-row">
           <button class="btn-primary" id="dlPdf">&#11015;&nbsp; PDF</button>
@@ -145,19 +174,15 @@
         </div>
       </div>
 
-      <!-- Summary pills -->
       <div class="summary-bar" id="summaryBar"></div>
 
-      <!-- Extraction warning -->
       <div class="warning-box" id="extractionWarning" hidden>
-        <strong>&#9888; Extraction warning</strong>
+        <strong>&#9888; Note</strong>
         <ul id="warningList"></ul>
       </div>
 
-      <!-- Feedback sections rendered here -->
       <div id="feedbackBody"></div>
 
-      <!-- Priority checklist -->
       <div class="priority-box" id="priorityBox" hidden>
         <h3 class="priority-title">&#9989;&nbsp; Priority checklist before submission</h3>
         <div class="table-wrap">
@@ -168,8 +193,7 @@
         </div>
       </div>
 
-      <!-- Footer note -->
-      <p class="results-footer">Overall: The reports are mostly polished and professional. The issues above are mainly consistency, tone, and editing checks before submission.</p>
+      <p class="results-footer" id="resultsFooter"></p>
 
       <div class="download-row download-row--bottom">
         <button class="btn-primary" id="dlPdf2">&#11015;&nbsp; Download PDF feedback</button>
@@ -187,18 +211,17 @@
 
 </div>
 
-<!-- CDN LIBRARIES -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
-  if (typeof pdfjsLib !== 'undefined') {
+  if(typeof pdfjsLib !== 'undefined'){
     pdfjsLib.GlobalWorkerOptions.workerSrc =
       'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   }
 </script>
 <script src="script.js"></script>
-
 </body>
 </html>
