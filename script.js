@@ -113,6 +113,20 @@ function escH(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;
 function wc(t)   { return (t.match(/\b[a-zA-Z]+\b/g)||[]).length; }
 function cap(s)  { return s.charAt(0).toUpperCase() + s.slice(1); }
 
+/* Returns true only if t looks like a real student name (1–4 title-case words,
+   no punctuation, first word not a known non-name keyword). Used to validate
+   PDF col0 text before treating it as a student name. */
+function isLikelyStudentName(t){
+  if(!t || t.length < 2 || t.length > 45) return false;
+  if(/[.!?,;:–—()\[\]{}0-9]/.test(t)) return false;
+  const words = t.trim().split(/\s+/);
+  if(words.length < 1 || words.length > 4) return false;
+  if(!words.every(w => /^[A-Z][a-zA-Z''-]{0,20}$/.test(w))) return false;
+  if(NOT_NAMES.has(words[0])) return false;
+  if(words[0].length < 2) return false;
+  return true;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    PDF READING — COLUMN-AWARE TABLE EXTRACTION
 ═══════════════════════════════════════════════════════════════ */
@@ -217,7 +231,7 @@ function extractPdfTableSegments(allItems, colInfo, manualRoster){
     if(!t || SKIP_RE.test(t)) return;
     if(LEVEL_RE.test(t)){
       levelEntries.push({page:line.page, y:line.y});
-    } else if(t.length>=2 && t.length<=40 && !NOT_NAMES.has(t)){
+    } else if(isLikelyStudentName(t)){
       studentEntries.push({name:t, page:line.page, y:line.y});
       roster.add(t);
     }
@@ -470,9 +484,11 @@ function checkWrongName(seg, roster){
   const issues    = [];
 
   for(const other of roster){
+    if(issues.length >= 3) break; // safety cap: max 3 wrong-name issues per segment
     if(other===student) continue;
     const otherFirst = other.split(/[\s\-]+/)[0];
-    if(otherFirst.length<3 || NOT_NAMES.has(otherFirst)) continue;
+    const otherFirstCap = otherFirst.charAt(0).toUpperCase()+otherFirst.slice(1);
+    if(otherFirst.length<3 || NOT_NAMES.has(otherFirst) || NOT_NAMES.has(otherFirstCap)) continue;
 
     const re = new RegExp(`\\b${escRe(otherFirst)}\\b`,'g');
     const sents = splitSentences(text);
